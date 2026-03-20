@@ -289,6 +289,41 @@ events <- events %>%
 
 ########################################################################################################
 
+##################
+#relabel receiver groups from arcgis metadata
+# Fix conflicts in correct_groups before relabeling events
+# Create correct location to receiver_group lookup from receiver_metadata
+# Step 1: Build correct_groups from receiver_metadata
+correct_groups <- receiver_metadata %>%
+  distinct(relatedcatalogitem, receiver_group) %>%
+  filter(!is.na(relatedcatalogitem), relatedcatalogitem != "",
+         !is.na(receiver_group), receiver_group != "") %>%
+  rename(location = relatedcatalogitem,
+         receiver_group_correct = receiver_group) %>%
+  # Fix conflicts
+  mutate(receiver_group_correct = case_when(
+    location == "SR_FEATHER2_RT" ~ "sacramento",
+    location == "RICHBR_22_2015" ~ "bay",
+    TRUE ~ receiver_group_correct
+  )) %>%
+  # Remove duplicates
+  distinct(location, .keep_all = TRUE)
+
+
+
+events <- events %>%
+  select(-receiver_group) %>%
+  left_join(correct_groups %>% rename(receiver_group = receiver_group_correct), 
+            by = "location") %>%
+  mutate(receiver_group = ifelse(group == 24, "spawning_ground", receiver_group))
+
+# Verify
+unique(events$receiver_group)
+
+events %>%
+  filter(location %in% c("YBCSNE", "YBCSNW")) %>%
+  distinct(location, receiver_group)
+
 ###################################################
 #sort into up and down migrants 
 #Battalie 2024 used Approximate Coordinates (RM 200 / 322 km) which is approximately hamilton city 
@@ -296,15 +331,13 @@ events <- events %>%
 #do I still use this as a downstream migration point?
 # our lowest point for group 24 is -121.9745, 39.73131
 
-#adding the previous group numbers so I have it
 events <- events %>%
-  left_join(
-    group %>%
-      distinct(location, group),
-    by = "location"
-  )
-events <- events %>%
-  mutate(receiver_group = ifelse(group == 24, "spawning_ground", receiver_group))
+  mutate(receiver_group = case_when(
+    group == 24 ~ "spawning_ground",
+    TRUE ~ receiver_group
+  ))
+
+unique(events$receiver_group)
 
 #######################################################################################################
 #summary stats
@@ -371,19 +404,20 @@ migration_status <- migration_status %>%
     animal_id == "UCDHIST-GS0823-2012-07-03" & water_year == 2021 ~ "bad",
     TRUE ~ status
   ))
-migration_status %>% count(lifestage, status)
 dead_fish <- c("UCDHIST-GS0276-2005-08-20", "UCDHIST-GS0488-2011-08-10",
                "UCDHIST-GS0512-2012-04-20", "UCDHIST-GS0516-2012-04-26",
                "UCDHIST-GS0634-2011-07-08", "UCDHIST-GS0806-2012-07-01",
                "UCDHIST-GS0814-2012-07-01", "UCDHIST-GS0821-2012-07-02",
                "UCDHIST-GS0823-2012-07-03", "CDFWA15-1306970-2018-12-18")
+migration_status %>% count(status)
 
-migration_status <- migration_status %>%
-  mutate(status = ifelse(animal_id %in% dead_fish, "incomplete_dead", status))
-
+# Remove status column if it already exists before joining
 events <- events %>%
-  left_join(migration_status %>% dplyr::select(animal_id, water_year, status),
+  select(-any_of("status")) %>%
+  left_join(migration_status %>% 
+              dplyr::select(animal_id, water_year, status),
             by = c("animal_id", "water_year"))
+
 # Remove the duplicate column and rename the one you want to keep
 events <- events %>%
   dplyr::select(-status.y) %>%
@@ -391,6 +425,9 @@ events <- events %>%
 
 events <- events %>% dplyr::select(-event)
 
-write.csv (events, "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_031626.csv", row.names = FALSE)
+# updated receiver_groups that were not labled 
+write.csv (events, "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_032026.csv", row.names = FALSE)
 
-events <- read.csv ("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_031626.csv")
+events <- read.csv ("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_032026.csv")
+head(events)
+

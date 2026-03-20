@@ -409,3 +409,6 @@ events <- events %>%
 
 
 write.csv(events, "C:/Users/eetracy/Desktop/ST_telemetry/events_with_receivergroups_021826.csv", row.names = FALSE)
+
+#this has the correct groups from arcgis
+receiver_metadata <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/arc_receivers_update.csv")

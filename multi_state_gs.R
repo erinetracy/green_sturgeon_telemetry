@@ -19,7 +19,10 @@ events %>%
   arrange(mean_lat)
 
 filtered_events <- events %>%
-  filter(status =="up_complete")
+  inner_join(
+    migration_status %>% filter(status %in% c("up_complete","up_incomplete")) %>%
+      select(animal_id, water_year, status),
+    by = c("animal_id","water_year"))
 
 filtered_events %>%
   filter(status == "up_complete", receiver_group == "sacramento") %>%
@@ -117,25 +120,15 @@ occasion_coverage %>%
 # of how many had gaps of more than 7 days. Curious how to integrate into detection probability
 # Create reference table of location to receiver_group from filtered_events
 
-#i think events has outdated receiver_group labels 
-# Create correct location to receiver_group lookup from receiver_metadata
-# Rebuild correct_groups from receiver_metadata only
-correct_groups <- receiver_metadata %>%
-  distinct(relatedcatalogitem, receiver_group) %>%
-  filter(!is.na(relatedcatalogitem), relatedcatalogitem != "",
-         !is.na(receiver_group), receiver_group != "") %>%
-  rename(location = relatedcatalogitem,
-         receiver_group_correct = receiver_group)
+#i think events has outdated receiver_group labels so i updated from receiver_metadata
 
-# Then relabel events
-events <- events %>%
-  left_join(correct_groups, by = "location") %>%
-  mutate(receiver_group = ifelse(!is.na(receiver_group_correct), 
-                                 receiver_group_correct, 
-                                 receiver_group)) %>%
-  select(-receiver_group_correct)
+#how many fish do we have complete and incomplete 
+migration_status %>%
+  filter(status == "up_complete") %>%
+  count(water_year) %>%
+  arrange(water_year)
 
-# Verify yolo is now labeled
-events %>%
-  filter(location %in% c("YBCSNE", "YBCSNW")) %>%
-  distinct(location, receiver_group)
+filtered_events %>%
+  filter(status == "up_complete", receiver_group == "yolo_bypass") %>%
+  distinct(animal_id, water_year) %>%
+  count(water_year)
