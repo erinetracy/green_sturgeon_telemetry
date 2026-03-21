@@ -123,12 +123,21 @@ occasion_coverage %>%
 #i think events has outdated receiver_group labels so i updated from receiver_metadata
 
 #how many fish do we have complete and incomplete 
-migration_status %>%
-  filter(status == "up_complete") %>%
-  count(water_year) %>%
-  arrange(water_year)
+filtered_events <- events %>%
+  inner_join(
+    migration_status %>% filter(status %in% c("up_complete","up_incomplete", "incomplete_dead")) %>%
+      select(animal_id, water_year, status),
+    by = c("animal_id","water_year"))
+
+filtered_events <- filtered_events %>%
+  select(-status.y) %>%
+  rename(status = status.x)
+
 
 filtered_events %>%
-  filter(status == "up_complete", receiver_group == "yolo_bypass") %>%
-  distinct(animal_id, water_year) %>%
-  count(water_year)
+  filter (status =="up_complete") %>%
+  group_by(receiver_group) %>%
+  summarise(n_fish = n_distinct(animal_id)) %>%
+  arrange(desc(n_fish))
+
+write.csv(filtered_events, "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_upmigration_032126.csv")

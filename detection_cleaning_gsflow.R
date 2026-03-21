@@ -288,6 +288,7 @@ events <- events %>%
   mutate(water_year = ifelse(month > 9, year + 1, year))
 
 ########################################################################################################
+receiver_metadata <- read.csv("")
 
 ##################
 #relabel receiver groups from arcgis metadata
@@ -309,8 +310,6 @@ correct_groups <- receiver_metadata %>%
   # Remove duplicates
   distinct(location, .keep_all = TRUE)
 
-
-
 events <- events %>%
   select(-receiver_group) %>%
   left_join(correct_groups %>% rename(receiver_group = receiver_group_correct), 
@@ -319,10 +318,6 @@ events <- events %>%
 
 # Verify
 unique(events$receiver_group)
-
-events %>%
-  filter(location %in% c("YBCSNE", "YBCSNW")) %>%
-  distinct(location, receiver_group)
 
 ###################################################
 #sort into up and down migrants 
