@@ -399,11 +399,30 @@ migration_status <- migration_status %>%
     animal_id == "UCDHIST-GS0823-2012-07-03" & water_year == 2021 ~ "bad",
     TRUE ~ status
   ))
-dead_fish <- c("UCDHIST-GS0276-2005-08-20", "UCDHIST-GS0488-2011-08-10",
-               "UCDHIST-GS0512-2012-04-20", "UCDHIST-GS0516-2012-04-26",
-               "UCDHIST-GS0634-2011-07-08", "UCDHIST-GS0806-2012-07-01",
-               "UCDHIST-GS0814-2012-07-01", "UCDHIST-GS0821-2012-07-02",
-               "UCDHIST-GS0823-2012-07-03", "CDFWA15-1306970-2018-12-18")
+dead_fish_years <- data.frame(
+  animal_id = c("UCDHIST-GS0276-2005-08-20",
+                "UCDHIST-GS0488-2011-08-10",
+                "UCDHIST-GS0512-2012-04-20",
+                "UCDHIST-GS0516-2012-04-26",
+                "UCDHIST-GS0821-2012-07-02",
+                "UCDHIST-GS0814-2012-07-01",
+                "CDFWA15-1306970-2018-12-18"),
+  water_year = c(2008, 2016, 2015, 2012, 2014, 2020, 2020)
+)
+
+# Relabel only the specific year in migration_status
+migration_status <- migration_status %>%
+  left_join(dead_fish_years %>% mutate(is_dead = TRUE),
+            by = c("animal_id", "water_year")) %>%
+  mutate(status = ifelse(!is.na(is_dead), "incomplete_dead", status)) %>%
+  select(-is_dead)
+
+# Verify
+migration_status %>%
+  filter(animal_id %in% dead_fish_years$animal_id) %>%
+  select(animal_id, water_year, status) %>%
+  arrange(animal_id, water_year)
+
 migration_status %>% count(status)
 
 # Remove status column if it already exists before joining
