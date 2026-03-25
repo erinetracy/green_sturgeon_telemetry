@@ -175,12 +175,27 @@ model1_events %>%
 # this should all receivers to maximize detection 
 # Assign occasions to model1_events
 # Occasion 1: benicia + carquinez (migration start)
-# Occasion 2: Rio vista (state 1=Sac) OR georgiana/mok_deltacross (state 2/3)
+# Occasion 2: Rio vista (state 1=Sac) OR georgiana/DCC (state 2/3)
 # Occasion 3: SR_MOUTH area (state 1=Sac) OR steamboat_sutter (state 4)
-# Occasion 4: SR_BLWSTEAM (state 1) - confirms Geo/DC rejoined sac
+# Occasion 4: SR_BLWSTEAM (state 1) - confirms Geo/DCC rejoined sac
 # Occasion 5: SR_FREEPORT area (state 1) - confirms Steamboat/Sutter rejoined
 # Occasion 6: SR_BLWCHIBEND + SR_BUTTEBR (state 1) - upper sac
 # Occasion 7: spawning_ground (state 1) - terminal state
+
+# Rename mok_deltacross to DCC in model1_events
+# and restrict DCC detections to SR_DCC and SR_DCC2 only
+model1_events <- model1_events %>%
+  mutate(receiver_group = case_when(
+    receiver_group == "mok_deltacross" ~ "DCC",
+    TRUE ~ receiver_group
+  )) %>%
+  # Set DCC receiver group to NA for mok receivers that arent SR_DCC or SR_DCC2
+  mutate(receiver_group = case_when(
+    receiver_group == "DCC" & 
+      !location %in% c("SR_DCC", "SR_DCC2") ~ NA_character_,
+    TRUE ~ receiver_group
+  ))
+
 
 model1_events <- model1_events %>%
   mutate(occasion = case_when(
@@ -190,7 +205,7 @@ model1_events <- model1_events %>%
     # Occasion 2: first decision point
     # Rio Vista = stayed sac, georgiana/mok = took alternative route
     # Decker/Horseshoe excluded - ambiguous due to side channels
-    receiver_group %in% c("georgiana", "mok_deltacross") ~ 2,
+    receiver_group %in% c("georgiana", "DCC") ~ 2,
     receiver_group == "sacramento" & 
       location %in% c("SR_RV10_7L", "SR_RV125L", "RIOVISTABR01", "SR_RV127L",
                       "RIOVISTABR02", "RIOVISTABR03", "SR_RV169L", "SR_RV169R") ~ 2,
@@ -264,7 +279,7 @@ model1_events <- model1_events %>%
   mutate(state = case_when(
     receiver_group %in% c("benicia", "carquinez", "sacramento", "spawning_ground") ~ 1,
     receiver_group == "georgiana"        ~ 2,
-    receiver_group == "mok_deltacross"   ~ 3,
+    receiver_group == "DCC"   ~ 3,
     receiver_group == "steamboat_sutter" ~ 4,
     TRUE ~ NA_real_
   ))
@@ -335,3 +350,65 @@ table(ch_mat)
 colMeans(ch_mat > 0)
 #    occ_1     occ_2     occ_3     occ_4     occ_5     occ_6     occ_7 
 #1.0000000 0.9819820 0.8738739 0.8513514 0.9414414 1.0000000 1.0000000 
+
+
+#investigating fish detections per year
+# How many unique fish hit each state per water year
+state_summary <- detection_history %>%
+  group_by(water_year) %>%
+  summarise(
+    n_fish = n(),
+    n_sac    = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 1))),
+    n_geo    = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 2))),
+    n_dcc    = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 3))),
+    n_ss     = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 4))),
+    n_dead   = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 5))),
+    n_failed = sum(apply(select(cur_data(), occ_1:occ_7), 1, function(x) any(x == 6)))
+  ) %>%
+  arrange(water_year)
+
+print(state_summary)
+
+model1_events %>%
+  filter(receiver_group %in% c("interior_delta", "DCC", "georgiana")) %>%
+  distinct(animal_id, water_year) %>%
+  count(water_year) %>%
+  arrange(water_year)
+
+
+#map of receivers
+library(leaflet)
+
+# Get representative coordinates for each receiver group
+route_points <- model1_events %>%
+  filter(receiver_group %in% c("benicia", "carquinez", "sacramento", 
+                               "interior_delta", "georgiana", "DCC",
+                               "steamboat_sutter", "spawning_ground")) %>%
+  mutate(route = case_when(
+    receiver_group %in% c("georgiana", "interior_delta", "DCC") ~ "Interior Delta",
+    receiver_group == "steamboat_sutter" ~ "Steamboat/Sutter",
+    receiver_group == "spawning_ground" ~ "Spawning Ground",
+    receiver_group %in% c("benicia", "carquinez") ~ "Start",
+    receiver_group == "sacramento" ~ "Sacramento"
+  )) %>%
+  group_by(location, route, receiver_group) %>%
+  summarise(lat = mean(mean_latitude), lng = mean(mean_longitude), .groups = "drop")
+
+# Color by route
+pal <- colorFactor(
+  palette = c("blue", "orange", "green", "red", "purple"),
+  domain = c("Sacramento", "Interior Delta", "Steamboat/Sutter", "Start", "Spawning Ground")
+)
+
+leaflet(route_points) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~lng, lat = ~lat,
+    color = ~pal(route),
+    radius = 5,
+    popup = ~paste(location, "<br>", route),
+    label = ~route
+  ) %>%
+  addLegend(pal = pal, values = ~route, title = "Route")
+
+
