@@ -37,6 +37,7 @@ library(abind)
 library(MCMCvis)
 library(dplyr)
 library(lubridate)
+library(tidyr)
 
 #==============================================================================
 # SECTION 1: FILTER TO MODEL 1 FISH
@@ -905,7 +906,7 @@ MCMC   <- buildMCMC(confMCMC)
 CModel <- compileNimble(nimMod)
 CMCMC  <- compileNimble(MCMC, project = CModel)
 
-#do a test run on 50000 if re-trying 
+#do a test run on 5000 if re-trying 
 
 # Full run
 mcmc_out_full <- runMCMC(
@@ -919,3 +920,16 @@ mcmc_out_full <- runMCMC(
 )
 
 MCMCsummary(mcmc_out_full, round = 3)
+# Save immediately when done
+
+save(mcmc_out_full, file = "gs_mcmc_full_run1.RData")
+MCMCtrace(mcmc_out_full,
+          params = c("psi_geo", "psi_dcc", "psi_ss", "phi_fail", "lambda"),
+          pdf = TRUE, filename = "gs_mcmc_traces_run1",
+          ind = TRUE, Rhat = TRUE, n.eff = TRUE)
+
+
+
+###########################################################################################
+#FLOW
+

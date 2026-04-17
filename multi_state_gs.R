@@ -771,4 +771,3 @@ table(exploration_summary$explored_geo)
 table(exploration_summary$explored_ss)
 table(exploration_summary$explored_dcc)
 
-
