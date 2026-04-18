@@ -448,9 +448,52 @@ leaflet(route_points) %>%
   ) %>%
   addLegend(pal = pal, values = ~route, title = "Route")
 
-# Fish detected at SS (state 4) at occ3 then Sac (state 1) at occ4
-ch_mat_nimble[ch_mat_nimble[,3] == 4 & ch_mat_nimble[,4] == 1, ]
-detection_history[ch_mat_nimble[,3] == 4 & ch_mat_nimble[,4] == 1, 
-                  c("animal_id", "water_year", "status")]
 
+#exploratory receiver analysis 
+#doesnt need to be done every time 
+
+#this shows the NA and blank detections are outside study area and dont need consideration
+# %>%
+#  filter(receiver_group == "" | is.na(receiver_group)) %>%
+#  distinct(location, receiver_group) 
+
+#lookin at detection per water_year
+#events %>%
+#  filter(receiver_group %in% c("benicia", "carquinez", "sacramento", 
+#                               "georgiana", "mok_deltacross", "steamboat_sutter",
+#                               "yolo_bypass", "spawning_ground")) %>%
+#  group_by(water_year, receiver_group) %>%
+#  summarise(n_fish = n_distinct(animal_id), .groups = "drop") %>%
+#  tidyr::pivot_wider(names_from = receiver_group, values_from = n_fish, values_fill = 0) %>%
+#  arrange(water_year)
+
+#receiver coverage by water year
+#receiver_metadata %>%
+#  mutate(year = lubridate::year(lubridate::mdy_hm(startdatetime))) %>%
+#  filter(receiver_group %in% c("benicia", "carquinez", "sacramento",
+#                               "georgiana", "mok_deltacross", "steamboat_sutter",
+#                               "yolo_bypass", "spawning_ground")) %>%
+#  mutate(receiver_group = case_when(
+#    receiver_group == "benicia"          ~ "B",
+#    receiver_group == "carquinez"        ~ "C",
+#    receiver_group == "sacramento"       ~ "Sac",
+#    receiver_group == "georgiana"        ~ "G",
+#    receiver_group == "mok_deltacross"   ~ "DCC",
+#    receiver_group == "steamboat_sutter" ~ "SS",
+#    receiver_group == "yolo_bypass"      ~ "Y",
+#    receiver_group == "spawning_ground"  ~ "SG"
+#  )) %>%
+#  group_by(receiver_group, year) %>%
+#  summarise(
+#    n = n(),
+#    good = sum(gap_days < 7, na.rm = TRUE),
+#    .groups = "drop"
+#  ) %>%
+#  tidyr::pivot_wider(
+#    names_from = receiver_group,
+#    values_from = c(n, good),
+#    values_fill = 0
+#  ) %>%
+#  arrange(year) %>%
+#  print(n=50)
 

@@ -1,168 +1,95 @@
-#mulit state gs DATA PREPARATION
-library(nimble)
-library(dplyr)
-library(nimbleEcology)
-library(abind)
-library(MCMCvis)
-library(lubridate)
-library(abind)
-
-
-#starting with figuring out receiver group locations to match up with states 
-events %>%
-  filter(status == "up_complete") %>%
-  group_by(receiver_group) %>%
-  summarise(
-    mean_lat = mean(mean_latitude, na.rm = TRUE),
-    min_lat = min(mean_latitude, na.rm = TRUE),
-    max_lat = max(mean_latitude, na.rm = TRUE),
-    n_locations = n_distinct(location)
-  ) %>%
-  arrange(mean_lat)
-
-filtered_events <- events %>%
-  inner_join(
-    migration_status %>% filter(status %in% c("up_complete","up_incomplete")) %>%
-      select(animal_id, water_year, status),
-    by = c("animal_id","water_year"))
-
-filtered_events %>%
-  filter(status == "up_complete", receiver_group == "sacramento") %>%
-  distinct(location, mean_latitude, mean_longitude) %>%
-  arrange(mean_latitude) %>%
-  as.data.frame()
-
-
-#try to id receiver points before confluences for route transitions
-library(leaflet)
-
-filtered_events %>%
-  filter(status == "up_complete", receiver_group == "sacramento") %>%
-  distinct(location, mean_latitude, mean_longitude) %>%
-  leaflet() %>%
-  addTiles() %>%
-  addCircleMarkers(
-    lng = ~mean_longitude,
-    lat = ~mean_latitude,
-    popup = ~paste(location, "<br>", 
-                   "Lat:", mean_latitude, "<br>", 
-                   "Lon:", mean_longitude),
-    radius = 5,
-    color = "blue"
-  )
-
-#separating sac receiver group into multiple groups 
-filtered_events <- filtered_events %>%
-  mutate(occasion = case_when(
-    receiver_group %in% c("benicia", "carquinez") ~ 1,
-    receiver_group == "sacramento" & 
-      location %in% c("DECKER_ISSE", "DECKER_ISCL3", "DECKER_ISCR2", "DECKER_ISSW") ~ 2,
-    receiver_group %in% c("georgiana", "mok_deltacross") ~ 2,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_MOUTH", "SR_MOUTH_2", "SR_RV150R") ~ 3,
-    receiver_group %in% c("steamboat_sutter", "yolo_bypass") ~ 3,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_BLWSTEAM", "SR_BLWSTEAM2") ~ 4,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_FREEPORT", "SR_FREEPORT_1", "SR_GB470L", 
-                      "SR_FREEPORTDIV_W", "SR_FREEPORTDIV_S", "SR_FREEPORTDIV_N") ~ 5,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_BLWCHIBEND_W2", "SR_BLWCHIBEND_E", "SR_BLWCHIBEND_W",) ~ 6,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_MERIDIANBR", "SR_MERIDIANBR2", "SR_BUTTEBR",
-                      "BUTTEBR2-V", "BUTTEBR3-V", "SR_BUTTEBR") ~ 7,
-    receiver_group == "spawning_ground" ~ 7,
-    TRUE ~ NA_real_
-  ))
-##############################################################################################
-#looking at receiver coverage and fish detections
-
-#this one is old
-#receiver_metadata <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/full_receiver_pull_OTNmoorings_Cleaned_120825.csv")
-#this one is current
-receiver_metadata <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/arc_receivers_update.csv")
-#i think events has outdated receiver_group labels so i updated from receiver_metadata
-
-#how many fish do we have complete and incomplete 
-filtered_events <- events %>%
-  inner_join(
-    migration_status %>% filter(status %in% c("up_complete","up_incomplete", "incomplete_dead")) %>%
-      select(animal_id, water_year, status),
-    by = c("animal_id","water_year"))
-
-filtered_events <- filtered_events %>%
-  select(-status.y) %>%
-  rename(status = status.x)
-
-filtered_events %>%
-  filter (status =="up_complete") %>%
-  group_by(receiver_group) %>%
-  summarise(n_fish = n_distinct(animal_id)) %>%
-  arrange(desc(n_fish))
-
-write.csv(filtered_events, "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_upmigration_032126.csv")
-
-#this shows the NA and blank detections are outside study area and dont need consideration
-events %>%
-  filter(receiver_group == "" | is.na(receiver_group)) %>%
-  distinct(location, receiver_group) 
-
-#lookin at detection per water_year
-events %>%
-  filter(receiver_group %in% c("benicia", "carquinez", "sacramento", 
-                               "georgiana", "mok_deltacross", "steamboat_sutter",
-                               "yolo_bypass", "spawning_ground")) %>%
-  group_by(water_year, receiver_group) %>%
-  summarise(n_fish = n_distinct(animal_id), .groups = "drop") %>%
-  tidyr::pivot_wider(names_from = receiver_group, values_from = n_fish, values_fill = 0) %>%
-  arrange(water_year)
-
-#receiver coverage by water year
-receiver_metadata %>%
-  mutate(year = lubridate::year(lubridate::mdy_hm(startdatetime))) %>%
-  filter(receiver_group %in% c("benicia", "carquinez", "sacramento",
-                               "georgiana", "mok_deltacross", "steamboat_sutter",
-                               "yolo_bypass", "spawning_ground")) %>%
-  mutate(receiver_group = case_when(
-    receiver_group == "benicia"          ~ "B",
-    receiver_group == "carquinez"        ~ "C",
-    receiver_group == "sacramento"       ~ "Sac",
-    receiver_group == "georgiana"        ~ "G",
-    receiver_group == "mok_deltacross"   ~ "DCC",
-    receiver_group == "steamboat_sutter" ~ "SS",
-    receiver_group == "yolo_bypass"      ~ "Y",
-    receiver_group == "spawning_ground"  ~ "SG"
-  )) %>%
-  group_by(receiver_group, year) %>%
-  summarise(
-    n = n(),
-    good = sum(gap_days < 7, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  tidyr::pivot_wider(
-    names_from = receiver_group,
-    values_from = c(n, good),
-    values_fill = 0
-  ) %>%
-  arrange(year) %>%
-  print(n=50)
-
-#==============================================================================
 #==============================================================================
 # GREEN STURGEON MULTISTATE MODEL - DATA PREPARATION
-# Model 1: 2007-2017
-# States: 1=Sacramento, 2=Georgiana, 3=DCC, 4=Steamboat/Sutter
-#         5=Death, 6=Failed migration
-# Occasions: 7 (Benicia -> Rio Vista -> SR_MOUTH -> SR_BLWSTEAM -> 
-#            SR_FREEPORT -> upper Sac -> Spawning ground)
+# Script: 04_multistate_data_prep.R
+# Author: Erin Tracy
+# Last updated: April 2026
+#
+# PURPOSE:
+# Prepare detection history matrix for green sturgeon upstream migration
+# multistate model. Filters events to model period, assigns occasions and
+# states, builds detection history matrix for use in NIMBLE model.
+#
+# INPUTS:
+#   - events_with_receivergroups_032026.csv: cleaned detection events with
+#     receiver group labels (from 01_receiver_cleaning.R and 02_detection_cleaning.R)
+#   - arc_receivers_update.csv: receiver metadata with group labels
+#   - migration_status: object from 03_migration_status.R
+#
+# OUTPUTS:
+#   - filtered_events: all upstream migration events (up_complete,
+#     up_incomplete, incomplete_dead)
+#   - model1_events: filtered to 2007-2017 with occasions and states assigned
+#   - detection_history: 222 x 7 detection history matrix with fish metadata
+#   - ch_mat: numeric matrix for NIMBLE (0 = not detected)
+#   - ch_mat_nimble: numeric matrix for dDHMMo (0 recoded to nstate+1)
+#   - fish_info: fish-level metadata (animal_id, water_year, status)
+#   - gs_multistate_data.RData: all objects saved for modeling script
+#
+# MODEL STRUCTURE:
+#   States: 1=Sacramento, 2=Georgiana, 3=DCC, 4=Steamboat/Sutter,
+#           5=Death (absorbing), 6=Failed migration (absorbing)
+#   Occasions: 7 (Benicia -> Rio Vista -> SR_MOUTH -> SR_BLWSTEAM ->
+#              SR_KK345R/SR_FREEPORT -> Upper Sac -> Spawning Ground)
+#   Years: 2007-2017 (Model 1, no Yolo Bypass)
+
+#mulit state gs DATA PREPARATION
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(nimbleEcology)
+library(abind)
+
+#==============================================================================
+# SECTION 1: LOAD DATA
 #==============================================================================
 
-# Step 1: Filter events to model years and status types
-model1_events <- filtered_events %>%
-  filter(status %in% c("up_complete", "incomplete_dead", "up_incomplete"),
-         water_year >= 2007, water_year <= 2017)
+events <- read.csv ("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_032026.csv")
+migration_status <- read.csv ("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/migratory_status_03162026.csv")
 
-# Step 2: Rename mok_deltacross to DCC, restrict to SR_DCC and SR_DCC2 only
+#write.csv(filtered_events, "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/events_with_receivergroups_upmigration_032126.csv")
+#==============================================================================
+#==============================================================================
+# SECTION 2: FILTER TO MODEL 1 YEARS AND ASSIGN RECEIVER GROUP LABELS
+#==============================================================================
+
+# Filter to model years and relevant migration statuses
+# DECISION: Include up_complete, up_incomplete, and incomplete_dead
+# RATIONALE: up_incomplete fish provide information about where migrations
+#   fail (coded as state 6 absorbing). incomplete_dead fish provide survival
+#   information (coded as state 5 absorbing). Excluding them would bias
+#   survival estimates upward.
+# NOTE: Model 1 is 2007-2017 without Yolo Bypass because Georgiana,
+#   DCC, and Steamboat/Sutter receivers were removed after 2017, making
+#   the full route model impossible beyond that year.
+# Step 1: Filter events to model years and status types
+
+
+# Build explicit inclusion list from migration_status
+# This ensures only the correct fish x water_year x status combinations
+# are included, avoiding join artifacts from the events dataset
+include_list <- migration_status %>%
+  filter(
+    status %in% c("up_complete", "up_incomplete", "incomplete_dead"),
+    water_year >= 2007,
+    water_year <= 2017
+  ) %>%
+  dplyr::select(animal_id, water_year, status)
+
+model1_events <- events %>%
+  dplyr::select(-any_of("status")) %>%
+  inner_join(include_list, by = c("animal_id", "water_year"))
+
+# Verify
+model1_events %>%
+  distinct(animal_id, water_year, status) %>%
+  count(status)
+
+# DECISION: Rename mok_deltacross to DCC and restrict to SR_DCC and SR_DCC2 only
+# RATIONALE: The mok_deltacross receiver group contained receivers at multiple
+#   locations including Mok River confluences where fish could branch onto the
+#   Mok River WITHOUT entering the Delta Cross Channel. Only SR_DCC and SR_DCC2
+#   are physically located inside the DCC channel itself. Detection there
+#   unambiguously confirms DCC entry.
 model1_events <- model1_events %>%
   mutate(receiver_group = case_when(
     receiver_group == "mok_deltacross" ~ "DCC",
@@ -174,24 +101,78 @@ model1_events <- model1_events %>%
     TRUE ~ receiver_group
   ))
 
-# Step 3: Assign occasions
+#==============================================================================
+# SECTION 3: ASSIGN OCCASIONS
+#==============================================================================
+
+# Occasions are defined by receiver location representing key decision points
+# along the upstream migration route.
+#
+# OCCASION STRUCTURE:
+# Occ 1: Benicia + Carquinez - migration start, all fish enter here
+# Occ 2: Rio Vista (Sac) OR Georgiana OR SR_DCC/SR_DCC2 - first junction
+# Occ 3: SR_MOUTH (Sac) OR Steamboat/Sutter MOUTH receivers - second junction
+# Occ 4: SR_BLWSTEAM area (Sac) - Geo/DCC rejoined, SS still passing through
+# Occ 5: SR_KK345R + SR_FREEPORT area (Sac) - SS has now rejoined Sacramento
+# Occ 6: SR_BLWCHIBEND + SR_BUTTEBR (Sac) - upper Sacramento
+# Occ 7: Spawning ground - terminal state
+#
+# KEY DECISIONS:
+# - Decker Island EXCLUDED from occasion 2: fish can split into interior delta
+#   side channels at Decker making it an ambiguous route indicator
+# - Rio Vista used as first decision point (SR_RV receivers at ~38.15-38.17N)
+# - STEAMBOATSL_MOUTH1/2 at occasion 3: entry point into Steamboat Slough
+# - SR_BLWSTEAM/SR_BLWGEORGIA/SR_BLWSUTTER at occasion 4:
+#   BLW = BELOW. These are downstream of where each slough rejoins Sacramento.
+#   Geo/DCC fish rejoined upstream of here. SS fish still in channel (pass-through).
+#   SS fish that TURNED AROUND would be detected here but with last(state)
+#   coding they are already coded as Sac (state 1).
+# - SR_KK345R moved to occasion 5: first receiver ABOVE both Steamboat AND
+#   Sutter Slough rejoin points. SS fish confirmed back on Sacramento here.
+
 model1_events <- model1_events %>%
   mutate(occasion = case_when(
+    
+    # Occasion 1: migration start
     receiver_group %in% c("benicia", "carquinez") ~ 1,
+    
+    # Occasion 2: first junction
+    # Georgiana and DCC = entered delta route
+    # Rio Vista Sacramento receivers = stayed on mainstem past delta entry
     receiver_group %in% c("georgiana", "DCC") ~ 2,
-    receiver_group == "sacramento" & 
+    receiver_group == "sacramento" &
       location %in% c("SR_RV10_7L", "SR_RV125L", "RIOVISTABR01", "SR_RV127L",
                       "RIOVISTABR02", "RIOVISTABR03", "SR_RV169L", "SR_RV169R") ~ 2,
-    receiver_group == "steamboat_sutter" ~ 3,
-    receiver_group == "sacramento" & 
+    
+    # Occasion 3: second junction
+    # Steamboat/Sutter MOUTH receivers only = entered SS from Sacramento
+    # SR_MOUTH = stayed on Sacramento past SS entry point
+    receiver_group == "steamboat_sutter" &
+      location %in% c("STEAMBOATSL_MOUTH1", "STEAMBOATSL_MOUTH2") ~ 3,
+    receiver_group == "sacramento" &
       location %in% c("SR_MOUTH_2", "SR_MOUTH", "SR_RV150R") ~ 3,
-    receiver_group == "sacramento" & 
+    
+    # Occasion 4: SR_BLWSTEAM area
+    # Geo/DCC fish have rejoined Sacramento (exited upstream of SR_BLWSTEAM)
+    # SS fish still in channel - pass-through (SR_BLWSTEAM is BELOW SS rejoin)
+    # Interior SS receivers = fish still traveling through Steamboat/Sutter
+    receiver_group == "steamboat_sutter" &
+      location %in% c("SUTSTMSLS1", "SUTSTMSLS2", "SUTSTMSLS",
+                      "SUTSL_BLWMINERSL", "STEAMBOATSL",
+                      "STMSL_MARI2", "STMSL_MARI1B", "STMSL_MARI",
+                      "SUTSLOUGH", "SUTSLOUGH2", "SUTSLOUGH1") ~ 4,
+    receiver_group == "sacramento" &
       location %in% c("SR_KK240L", "SR_RYDE", "SR_BLWGEORGIA2", "SR_BLWGEORGIA",
                       "SR_KK250L", "SR_DCCSOUTH", "SR_DCCSOUTH2", "SR_KK269L",
                       "SR_DCCNORTH", "SR_BLWSTEAM2", "SR_BLWSTEAM",
-                      "SR_BLWSUTTER", "SR_BLWSUTTER2", "SR_KK345R") ~ 4,
-    receiver_group == "sacramento" & 
-      location %in% c("SR_GB437R", "SR_GB447R", "SR_FREEPORT", "SR_FREEPORT_1",
+                      "SR_BLWSUTTER", "SR_BLWSUTTER2") ~ 4,
+    
+    # Occasion 5: SR_KK345R + SR_FREEPORT area
+    # SR_KK345R is ABOVE both Steamboat and Sutter Slough rejoin points
+    # SS fish confirmed back on Sacramento mainstem from SR_KK345R onwards
+    receiver_group == "sacramento" &
+      location %in% c("SR_KK345R",
+                      "SR_GB437R", "SR_GB447R", "SR_FREEPORT", "SR_FREEPORT_1",
                       "SR_GB470L", "SR_FREEPORTDIV_W", "SR_FREEPORTDIV_S",
                       "SR_FREEPORTDIV_N", "SR_ABVFREEPORTW", "SR_GB479R",
                       "SR_ABVFREEPORTE", "SR_ABVFREEPORTE-2", "SR_GB502L",
@@ -205,7 +186,9 @@ model1_events <- model1_events %>%
                       "SR_SRWTPD_VPS_NW", "SR_BLWAMERICANW", "SR_BLWAMERICANE",
                       "SR_ABVAMERICANW", "SR_ABVAMERICANE", "SR_RIVERVIEW_MARIW",
                       "SR_RIVERVIEW_MARIE") ~ 5,
-    receiver_group == "sacramento" & 
+    
+    # Occasion 6: upper Sacramento (Yolo rejoins here in Model 2)
+    receiver_group == "sacramento" &
       location %in% c("SR_RM69-1", "SR_RM69-2", "SR_RM69-5", "SR_RM69-7",
                       "SR_RM69-8", "SR_RM69-10", "SR_RM69-12", "SR_EH699R",
                       "SR_RM69-13", "SR_RM69-14", "SR_RM69-15", "SR_RM72-1",
@@ -224,11 +207,17 @@ model1_events <- model1_events %>%
                       "SR_ABVCOLUSABR2_RT", "SR_BLWBUTTE1", "SR_BLWBUTTE2",
                       "SR_BUTTEBR_E", "SR_BUTTEBR", "SR_BLWORD2", "SR_BLWORD1",
                       "SR_ORDBEND", "SR_ABVORDBR2", "SR_ABVCHICOCK") ~ 6,
+    
+    # Occasion 7: spawning ground - terminal state
     receiver_group == "spawning_ground" ~ 7,
+    
     TRUE ~ NA_real_
   ))
 
-# Step 4: Assign states
+#==============================================================================
+# SECTION 4: ASSIGN STATES
+#==============================================================================
+
 model1_events <- model1_events %>%
   mutate(state = case_when(
     receiver_group %in% c("benicia", "carquinez", "sacramento", "spawning_ground") ~ 1,
@@ -238,23 +227,73 @@ model1_events <- model1_events %>%
     TRUE ~ NA_real_
   ))
 
-# Step 5: Build detection history matrix
-# max(state) prioritizes alternative route detections over Sacramento
+#==============================================================================
+# SECTION 5: EXPLORATION BEHAVIOR VARIABLE
+#==============================================================================
+
+# BIOLOGICAL FINDING: 47.3% of fish (105/222) exhibit extended staging behavior
+# at junctions, making repeated exploratory forays into alternative routes
+# over periods of days to weeks before committing to a migration route.
+#
+# IMPORTANT: Fish detected at steamboat_sutter receivers that subsequently
+# appear at SR_BLWSTEAM on the Sacramento mainstem definitively entered
+# Steamboat/Sutter Slough then TURNED AROUND. SR_BLWSTEAM is BELOW where
+# Steamboat Slough rejoins the Sacramento - detection there after SS detection
+# means the fish reversed course. These fish are correctly coded as
+# explored_ss = TRUE even though their final committed route is Sacramento.
+# This exploration behavior is preserved separately for IBM analysis.
+
+exploration_summary <- model1_events %>%
+  filter(!is.na(occasion), !is.na(state)) %>%
+  arrange(animal_id, water_year, first_detection) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    explored_geo     = any(state == 2),
+    explored_dcc     = any(state == 3),
+    explored_ss      = any(state == 4),
+    explored_any     = any(state %in% c(2, 3, 4)),
+    n_alt_detections = sum(state %in% c(2, 3, 4)),
+    .groups = "drop"
+  )
+
+#==============================================================================
+# SECTION 6: BUILD DETECTION HISTORY MATRIX
+#==============================================================================
+
+# DECISION: Use last(state) at each occasion for detection history
+# RATIONALE: Captures the route the fish ULTIMATELY COMMITTED TO rather
+#   than exploratory forays. For the IBM we want P(fish takes route | flow)
+#   which is best represented by the final route choice, not exploration.
+#   Exploration behavior is preserved separately in exploration_summary.
+#
+# TESTED AND REJECTED:
+#   - max(state): only 1 fish had within-occasion Sac + alternative conflict
+#   - first(state): made the NaN problem worse (46 NaN vs 20 with last)
+#
+# ABSORBING STATE ASSIGNMENT:
+#   up_incomplete fish: state 6 (failed) filled forward after last detection
+#   incomplete_dead fish: state 5 (dead) filled forward after last detection
+
 detection_history <- model1_events %>%
   filter(!is.na(occasion), !is.na(state)) %>%
+  arrange(animal_id, water_year, occasion, first_detection) %>%
   group_by(animal_id, water_year, occasion) %>%
-  summarise(state = max(state), .groups = "drop") %>%
+  dplyr::summarise(state = last(state), .groups = "drop") %>%
   tidyr::pivot_wider(
     names_from = occasion,
     values_from = state,
     names_prefix = "occ_",
     values_fill = 0
   ) %>%
-  select(animal_id, water_year, occ_1, occ_2, occ_3, occ_4, occ_5, occ_6, occ_7) %>%
+  dplyr::select(animal_id, water_year,
+                occ_1, occ_2, occ_3, occ_4, occ_5, occ_6, occ_7) %>%
+  # Use status from model1_events directly - already filtered to correct statuses
   left_join(
-    migration_status %>% select(animal_id, water_year, status),
+    model1_events %>% 
+      distinct(animal_id, water_year, status),
     by = c("animal_id", "water_year")
   ) %>%
+  left_join(exploration_summary, by = c("animal_id", "water_year")) %>%
   rowwise() %>%
   mutate(
     last_occ = max(which(c(occ_1, occ_2, occ_3, occ_4, occ_5, occ_6, occ_7) > 0)),
@@ -272,32 +311,77 @@ detection_history <- model1_events %>%
     occ_7 = ifelse(status %in% c("incomplete_dead","up_incomplete") & 7 > last_occ, absorbing_state, occ_7)
   ) %>%
   ungroup() %>%
-  select(-last_occ, -absorbing_state)
+  dplyr::select(-last_occ, -absorbing_state)
 
-# Step 6: Convert to numeric matrix for NIMBLE
+cat("Total fish:", nrow(detection_history), "\n")
+print(table(detection_history$status))
+
+#==============================================================================
+# SECTION 7: CONVERT TO MATRIX AND FIX IMPOSSIBLE DETECTION SEQUENCES
+#==============================================================================
+
+# Store fish metadata separately
 fish_info <- detection_history %>%
-  select(animal_id, water_year, status)
+  dplyr::select(animal_id, water_year, status,
+                explored_geo, explored_dcc, explored_ss,
+                explored_any, n_alt_detections)
 
+# Convert to numeric matrix
+# 0 = not detected at that occasion
 ch_mat <- detection_history %>%
-  select(occ_1:occ_7) %>%
+  dplyr::select(occ_1:occ_7) %>%
   as.matrix()
 
-# Step 7: Verify
-nrow(ch_mat)                    # should be 222
-table(detection_history$status) # check status counts
-colMeans(ch_mat > 0)            # detection rates per occasion
-apply(ch_mat, 1, function(x) any(x == 2)) %>% sum()  # Georgiana fish
-apply(ch_mat, 1, function(x) any(x == 3)) %>% sum()  # DCC fish
-apply(ch_mat, 1, function(x) any(x == 4)) %>% sum()  # Steamboat/Sutter fish
+# Recode 0 (not detected) to nstate+1 (7) as required by dDHMMo
+nstate <- 6
+ch_mat_nimble <- ch_mat
+ch_mat_nimble[ch_mat_nimble == 0] <- nstate + 1
 
+# Fix impossible detection sequences caused by staging behavior
+# (fish visiting receivers from multiple occasions in real time)
+#
+# FIX 1: SS at occ3 then Sac at occ4 - fish entered SS then turned around
+# Recode occ3 to Sac - exploration preserved in explored_ss = TRUE
+ch_mat_nimble[ch_mat_nimble[,3] == 4 & ch_mat_nimble[,4] == 1, 3] <- 1
 
-# Save all key objects for multistate model
+# FIX 2: SS at occ3 then failed (state 6) at occ4 - same turnaround logic
+# Handled by allowing SS->failed transition in tr_34 (phi_fail on SS row)
+# No recoding needed - handled in transition matrix
+
+# FIX 3: Geo/DCC at occ2 then Sac at occ3 - fish entered Geo/DCC then turned around
+# Recode occ2 to Sac - exploration preserved in explored_geo/dcc = TRUE
+ch_mat_nimble[(ch_mat_nimble[,2] %in% c(2,3)) & ch_mat_nimble[,3] == 1, 2] <- 1
+
+# FIX 4: Sac at occ3 then SS at occ4 - late SS entry after SR_MOUTH
+# Cannot be accommodated by model structure - recode occ4 to not-detected
+ch_mat_nimble[ch_mat_nimble[,3] == 1 & ch_mat_nimble[,4] == 4, 4] <- nstate + 1
+
+#==============================================================================
+# SECTION 8: VERIFY
+#==============================================================================
+
+cat("Total fish:", nrow(ch_mat_nimble), "\n")  # should be 222
+cat("\nStatus breakdown:\n")
+print(table(detection_history$status))
+cat("\nDetection rates per occasion:\n")
+print(round(colMeans(ch_mat > 0), 3))
+cat("\nState counts in ch_mat_nimble:\n")
+print(table(ch_mat_nimble))
+cat("\nGeorgiana fish:", apply(ch_mat_nimble, 1, function(x) any(x == 2)) %>% sum(), "\n")
+cat("DCC fish:", apply(ch_mat_nimble, 1, function(x) any(x == 3)) %>% sum(), "\n")
+cat("Steamboat/Sutter fish:", apply(ch_mat_nimble, 1, function(x) any(x == 4)) %>% sum(), "\n")
+
+#==============================================================================
+# SECTION 9: SAVE ALL OBJECTS FOR MODELING SCRIPT
+#==============================================================================
 save(detection_history,
      ch_mat,
      ch_mat_nimble,
-     model1_events,
+     nstate,
      fish_info,
+     exploration_summary,
+     model1_events,
      migration_status,
-     filtered_events,
      events,
-     file = "gs_multistate_data.RData")
+     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_multistate_data.RData")
+cat("All objects saved\n")
