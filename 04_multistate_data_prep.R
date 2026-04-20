@@ -79,10 +79,27 @@ model1_events <- events %>%
   dplyr::select(-any_of("status")) %>%
   inner_join(include_list, by = c("animal_id", "water_year"))
 
+# CRITICAL FIX: Remove post-spawning detections
+# Use exact POSIXct timestamp not just date to catch same-day
+# spawning ground + downstream detections
+first_sg_date <- model1_events %>%
+  filter(receiver_group == "spawning_ground") %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    first_sg_date = min(as.POSIXct(first_detection)),  # timestamp not date
+    .groups = "drop"
+  )
+
+model1_events <- model1_events %>%
+  left_join(first_sg_date, by = c("animal_id", "water_year")) %>%
+  filter(
+    is.na(first_sg_date) |
+      as.POSIXct(first_detection) <= first_sg_date
+  ) %>%
+  dplyr::select(-first_sg_date)
+
 # Verify
-model1_events %>%
-  distinct(animal_id, water_year, status) %>%
-  count(status)
+cat("Detections after fix:", nrow(model1_events), "\n")
 
 # DECISION: Rename mok_deltacross to DCC and restrict to SR_DCC and SR_DCC2 only
 # RATIONALE: The mok_deltacross receiver group contained receivers at multiple
@@ -213,6 +230,8 @@ model1_events <- model1_events %>%
     
     TRUE ~ NA_real_
   ))
+
+
 
 #==============================================================================
 # SECTION 4: ASSIGN STATES
@@ -385,3 +404,185 @@ save(detection_history,
      events,
      file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_multistate_data.RData")
 cat("All objects saved\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Fixing problem that last occasion label is detecting downstream migration
+# Get first spawning ground detection date for each fish x water_year
+first_sg_date <- model1_events %>%
+  filter(receiver_group == "spawning_ground") %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    first_sg_date = as.POSIXct(min(first_detection)),
+    .groups = "drop"
+  )
+
+cat("Fish with spawning ground detections:", nrow(first_sg_date), "\n")
+
+# Now check scope of problem
+affected_fish <- model1_events %>%
+  left_join(first_sg_date, by = c("animal_id", "water_year")) %>%
+  filter(
+    !is.na(first_sg_date),
+    as.POSIXct(first_detection) > first_sg_date
+  ) %>%
+  distinct(animal_id, water_year, receiver_group) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    post_spawn_groups = paste(unique(receiver_group), collapse = ", "),
+    .groups = "drop"
+  )
+
+cat("Fish with post-spawning detections:", nrow(affected_fish), "\n")
+print(affected_fish, n = 50)
+
+#checking all fish detection history 
+
+# Build route string for each fish showing movement through time
+# Only using detections before spawning ground arrival (already fixed)
+
+route_summary <- model1_events %>%
+  filter(!is.na(receiver_group)) %>%
+  arrange(animal_id, water_year, first_detection) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    # Collapsed route - removes consecutive repeats at same receiver group
+    route_string = paste(rle(receiver_group)$values, collapse = " -> "),
+    # Key dates
+    first_benicia = as.Date(min(first_detection[receiver_group %in% 
+                                                  c("benicia", "carquinez")],
+                                na.rm = TRUE)),
+    first_sg = as.Date(min(first_detection[receiver_group == "spawning_ground"],
+                           na.rm = TRUE)),
+    last_det = as.Date(max(last_detection)),
+    # Migration duration
+    migration_days = as.integer(first_sg - first_benicia),
+    # Was DCC or Geo detected before spawning ground?
+    has_geo_upstream = any(receiver_group == "georgiana" & 
+                             as.Date(first_detection) < first_sg),
+    has_dcc_upstream = any(receiver_group %in% c("DCC", "mok_deltacross") & 
+                             as.Date(first_detection) < first_sg),
+    has_ss_upstream  = any(receiver_group == "steamboat_sutter" & 
+                             as.Date(first_detection) < first_sg),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    detection_history %>% dplyr::select(animal_id, water_year, 
+                                        occ_1:occ_7, status),
+    by = c("animal_id", "water_year")
+  )
+
+# Quick summary
+cat("Route string examples:\n")
+route_summary %>%
+  dplyr::select(animal_id, water_year, status, route_string, 
+                migration_days) %>%
+  print(n = 20)
+
+# Check for any fish where route goes backwards in time
+# (downstream detections after upstream detections)
+cat("\nFish with suspiciously long migrations (>60 days):\n")
+route_summary %>%
+  filter(migration_days > 60, status == "up_complete") %>%
+  dplyr::select(animal_id, water_year, migration_days, route_string) %>%
+  arrange(desc(migration_days))
+
+# Check Georgiana fish routes
+cat("\nGeorgiana fish routes:\n")
+route_summary %>%
+  filter(has_geo_upstream) %>%
+  dplyr::select(animal_id, water_year, route_string, 
+                migration_days, occ_2) %>%
+  print(n = 20)
+
+# Check SS fish routes
+cat("\nSteamboat/Sutter fish routes:\n")
+route_summary %>%
+  filter(has_ss_upstream) %>%
+  dplyr::select(animal_id, water_year, route_string,
+                migration_days, occ_3) %>%
+  print(n = 72)
+
+# Check detection history state assignments match route strings
+cat("\nState 2 (Geo) fish in detection history:\n")
+detection_history %>%
+  filter(occ_2 == 2) %>%
+  left_join(route_summary %>% 
+              dplyr::select(animal_id, water_year, route_string),
+            by = c("animal_id", "water_year")) %>%
+  dplyr::select(animal_id, water_year, occ_1:occ_4, 
+                route_string) %>%
+  print(n = 20)
+
+# Print full route summary with dates
+route_summary_full <- model1_events %>%
+  filter(!is.na(receiver_group)) %>%
+  arrange(animal_id, water_year, first_detection) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(
+    # Route with dates - shows receiver group and first detection date
+    route_with_dates = paste(
+      paste0(rle(receiver_group)$values, 
+             " (", format(as.Date(
+               sapply(rle(receiver_group)$values, function(rg) {
+                 min(first_detection[receiver_group == rg])
+               })), "%m/%d/%y"), ")"),
+      collapse = " -> "),
+    # Clean route without dates
+    route_string = paste(rle(receiver_group)$values, collapse = " -> "),
+    # Key dates
+    first_benicia  = as.Date(min(first_detection[receiver_group %in%
+                                                   c("benicia","carquinez")], na.rm = TRUE)),
+    first_rv       = as.Date(min(first_detection[receiver_group == "sacramento" &
+                                                   location %in% c("SR_RV10_7L","SR_RV125L",
+                                                                   "RIOVISTABR01","SR_RV127L","RIOVISTABR02",
+                                                                   "RIOVISTABR03","SR_RV169L","SR_RV169R")],
+                                 na.rm = TRUE)),
+    first_geo      = as.Date(min(first_detection[receiver_group == "georgiana"],
+                                 na.rm = TRUE)),
+    first_ss       = as.Date(min(first_detection[receiver_group == "steamboat_sutter"],
+                                 na.rm = TRUE)),
+    first_sg       = as.Date(min(first_detection[receiver_group == "spawning_ground"],
+                                 na.rm = TRUE)),
+    migration_days = as.integer(first_sg - first_benicia),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    detection_history %>% dplyr::select(animal_id, water_year, 
+                                        occ_1:occ_7, status),
+    by = c("animal_id", "water_year")
+  )
+
+# Save to csv so you can open in Excel and scroll through
+write.csv(route_summary_full,
+          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/route_summary_check.csv",
+          row.names = FALSE)
+
+cat("Saved to route_summary_check.csv\n")
+cat("Total fish:", nrow(route_summary_full), "\n")
+
+# Also print full table in R - wide format so set width high
+options(width = 300)
+route_summary_full %>%
+  dplyr::select(animal_id, water_year, status, 
+                first_benicia, first_rv, first_geo, 
+                first_ss, first_sg, migration_days,
+                occ_1, occ_2, occ_3, route_string) %>%
+  arrange(water_year, first_benicia) %>%
+  print(n = Inf)
