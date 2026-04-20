@@ -497,3 +497,45 @@ leaflet(route_points) %>%
 #  arrange(year) %>%
 #  print(n=50)
 
+# Junction 1: Rio Vista (occ2) - Geo/DCC decision point
+# Check which receivers are assigned to occ2 and their coverage
+model1_events %>%
+  filter(occasion == 2) %>%
+  group_by(receiver_group, location) %>%
+  dplyr::summarise(
+    n_fish = n_distinct(animal_id),
+    n_detections = n(),
+    water_years = paste(sort(unique(water_year)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  arrange(receiver_group, desc(n_fish))
+
+# Junction 2: SR_MOUTH/SS entry (occ3) - SS decision point
+model1_events %>%
+  filter(occasion == 3) %>%
+  group_by(receiver_group, location) %>%
+  dplyr::summarise(
+    n_fish = n_distinct(animal_id),
+    n_detections = n(),
+    water_years = paste(sort(unique(water_year)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  arrange(receiver_group, desc(n_fish))
+
+# Also check receiver metadata coverage at these locations
+receiver_metadata %>%
+  filter(relatedcatalogitem %in% c(
+    "SR_RV10_7L", "SR_RV125L", "RIOVISTABR01", "SR_RV127L",
+    "RIOVISTABR02", "RIOVISTABR03", "SR_RV169L", "SR_RV169R",
+    "STEAMBOATSL_MOUTH1", "STEAMBOATSL_MOUTH2",
+    "SR_MOUTH", "SR_MOUTH_2", "SR_RV150R"
+  )) %>%
+  mutate(year = lubridate::year(lubridate::mdy_hm(startdatetime))) %>%
+  group_by(relatedcatalogitem, receiver_group, year) %>%
+  dplyr::summarise(
+    n_deployments = n(),
+    gap_days_max = max(gap_days, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(relatedcatalogitem, year) %>%
+  print(n = 80)

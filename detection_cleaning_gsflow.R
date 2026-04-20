@@ -544,3 +544,42 @@ write.csv(
 
 cat("\nEvents with status saved to events_with_receivergroups_032026.csv\n")
 cat("migration_status object ready for use in 04_multistate_data_prep.R\n")
+
+
+#exploring age as a covariate
+#perry 2018 included length as a covariate 
+# Get one length per fish (some fish have multiple rows)
+fish_lengths <- events %>%
+  distinct(animal_id, length, age) %>%
+  filter(!is.na(length)) %>%
+  # If a fish has multiple length records take the first/most common
+  group_by(animal_id) %>%
+  dplyr::summarise(
+    length_m = first(length),
+    age_at_tag = first(age),
+    .groups = "drop"
+  )
+
+# Join to model fish
+model_fish_size <- detection_history %>%
+  dplyr::select(animal_id, water_year) %>%
+  left_join(fish_lengths, by = "animal_id") %>%
+  mutate(
+    # Approximate age at migration
+    tag_year = as.integer(substr(animal_id, 
+                                 nchar(animal_id)-9, 
+                                 nchar(animal_id)-6)),
+    years_since_tag = water_year - tag_year
+  )
+
+# Summary
+summary(model_fish_size$length_m)
+summary(model_fish_size$years_since_tag)
+hist(model_fish_size$years_since_tag, 
+     main = "Years between tagging and migration",
+     xlab = "Years since tagging")
+hist(model_fish_size$length_m,
+     main = "Fork length at tagging (m)",
+     xlab = "Fork length (m)")
+#lengths are all over the place (0.4 to 2) because of juveniles and time since taggin 
+#to migration is long 4-9 years old
