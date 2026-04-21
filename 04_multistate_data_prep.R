@@ -153,21 +153,19 @@ model1_events <- model1_events %>%
     # Occasion 1: migration start
     receiver_group %in% c("benicia", "carquinez") ~ 1,
     
-    # Occasion 2: first junction
-    # Georgiana and DCC = entered delta route
-    # Rio Vista Sacramento receivers = stayed on mainstem past delta entry
-    receiver_group %in% c("georgiana", "DCC") ~ 2,
+    # occ2: Rio Vista junction receivers
+    # SR_RV169L and SR_RV169R removed — physically upstream of SR_MOUTH
+    # despite appearing lower in lat/long due to Sacramento River bend
     receiver_group == "sacramento" &
-      location %in% c("SR_RV10_7L", "SR_RV125L", "RIOVISTABR01", "SR_RV127L",
-                      "RIOVISTABR02", "RIOVISTABR03", "SR_RV169L", "SR_RV169R") ~ 2,
+      location %in% c("RIOVISTABR01", "RIOVISTABR02", "RIOVISTABR03",
+                      "SR_RV10_7L", "SR_RV125L", "SR_RV127L") ~ 2,
     
-    # Occasion 3: second junction
-    # Steamboat/Sutter MOUTH receivers only = entered SS from Sacramento
-    # SR_MOUTH = stayed on Sacramento past SS entry point
-    receiver_group == "steamboat_sutter" &
-      location %in% c("STEAMBOATSL_MOUTH1", "STEAMBOATSL_MOUTH2") ~ 3,
+    # occ3: SR_MOUTH junction receivers
+    # SR_RV169L and SR_RV169R added here — confirmed upstream of SR_MOUTH
+    # by physical inspection, river bend causes misleading lat/long position
     receiver_group == "sacramento" &
-      location %in% c("SR_MOUTH_2", "SR_MOUTH", "SR_RV150R") ~ 3,
+      location %in% c("SR_MOUTH", "SR_MOUTH_2", "SR_RV150R",
+                      "SR_RV169L", "SR_RV169R") ~ 3,
     
     # Occasion 4: SR_BLWSTEAM area
     # Geo/DCC fish have rejoined Sacramento (exited upstream of SR_BLWSTEAM)
