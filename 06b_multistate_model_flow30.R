@@ -1,85 +1,98 @@
 #==============================================================================
-# GREEN STURGEON UPSTREAM MIGRATION MULTISTATE MODEL - WITH FLOW COVARIATE
-# Script: 06_multistate_model_flow.R
+# GREEN STURGEON UPSTREAM MIGRATION MULTISTATE MODEL - 30-DAY ANTECEDENT FLOW
+# Script: 06b_multistate_model_flow_30day.R
 # Author: Erin Tracy
 # Last updated: April 2026
 #
 # PURPOSE:
-# Extend the baseline 5-state multistate model (05_multistate_model.R) to
-# include river discharge (flow) as a covariate on routing probabilities.
-# Also simplifies survival structure from reach-specific to route-specific
-# following the data support available with 221 fish.
+# Parallel version of 06_multistate_model_flow.R using 30-day mean antecedent
+# flow before Benicia passage as the flow covariate instead of same-day
+# junction flow. Intended as a sensitivity analysis and model comparison.
 #
-# FLOW COVARIATE APPROACH (following Perry et al. 2018):
-# Perry assigned each fish the flow on the date it first arrived at each
-# junction (First Passage Time flow, FPT.flow). We follow this approach
-# exactly, using the USGS Rio Vista tidally-filtered daily discharge gauge
-# (station 11455420) as our flow variable.
+# COMPARISON WITH 06_multistate_model_flow.R:
+# The same-day junction flow model (06) asks:
+#   "Does the flow at the junction at the moment of the routing decision
+#    predict which route the fish takes?"
+#   -> Follows Perry et al. 2018 FPT.flow approach exactly
+#   -> Captures local hydraulic conditions at the decision point
 #
-# Two junction-specific flow covariates:
-#   flow_occ2[i]: flow at Rio Vista on date fish i first arrived at occ2
-#                 (Rio Vista junction) -> predictor for psi_geo[i]
-#   flow_occ3[i]: flow at Rio Vista on date fish i first arrived at occ3
-#                 (SR_MOUTH/SS junction) -> predictor for psi_ss[i]
+# This 30-day antecedent flow model (06b) asks:
+#   "Does the broader hydrological context in the 30 days before the fish
+#    entered the freshwater system predict which route it takes?"
+#   -> Captures systemic flow conditions driving migration behavior
+#   -> Single flow value per fish (not junction-specific)
+#   -> More closely related to migration initiation conditions
 #
-# NOTE ON ALTERNATIVE FLOW METRIC (30-day mean, separate analysis):
-# We also explored 30-day mean flow before Benicia passage as a predictor.
-# ANOVA comparing temporal scales showed 30-day mean best separates route
-# choices (F=2.13, p=0.097) vs 3-day (F=1.51), 7-day (F=1.54), 15-day
-# (F=1.64). This metric captures antecedent hydrological conditions and
-# may be more appropriate for modeling MIGRATION INITIATION (whether/when
-# fish start migrating from the ocean) rather than route selection. The
-# 30-day mean approach will be used in a separate migration initiation
-# analysis (possibly a survival/time-to-event model) using the extended
-# 2007-2021 Benicia dataset.
+# BIOLOGICAL RATIONALE FOR 30-DAY MEAN:
+# ANOVA comparing temporal scales of flow as predictors of route choice showed
+# 30-day mean flow before Benicia passage produced the strongest separation
+# among route groups (F=2.13, p=0.097) compared to shorter windows:
+#   3-day:  F=1.51, p=0.21
+#   7-day:  F=1.54, p=0.21
+#   15-day: F=1.64, p=0.18
+#   30-day: F=2.13, p=0.097 <- strongest signal
+# Note: p=0.097 is not conventionally significant and the ANOVA did not
+# account for detection probability. The 30-day window is chosen as the
+# best available temporal scale based on this exploratory analysis.
+#
+# The biological interpretation is that fish staging in the estuary integrate
+# flow conditions over weeks before committing to a route, rather than
+# responding to instantaneous flow pulses at the junction. Fish that entered
+# during sustained high-flow periods may have different route selection
+# behavior than fish entering during low-flow periods regardless of same-day
+# junction conditions.
+#
+# IMPORTANT CONCEPTUAL NOTE:
+# 30-day antecedent flow before Benicia is primarily a MIGRATION INITIATION
+# variable — it describes conditions when fish committed to beginning their
+# upstream migration. Using it as a routing predictor conflates two separate
+# behavioral decisions: (1) when to start migrating and (2) which route to
+# take. The cleaner use of this metric is in a separate migration initiation
+# analysis (time-to-event model) using the extended 2007-2021 Benicia dataset.
+# This model is run here as a sensitivity analysis only.
 #
 # KEY DIFFERENCES FROM PERRY 2018:
-# 1. Perry used Freeport gauge; we use Rio Vista (closest gauge to junctions)
-# 2. Perry modeled travel time explicitly to get exact arrival dates;
-#    we use observed first detection dates at each junction occasion
-# 3. Perry had fish size as a covariate on survival; we do not (tagging
-#    to migration lag too long for size at tagging to be meaningful)
-# 4. Perry had DCC gate open/closed covariate; we do not have gate records
-# 5. Perry had release group random effects; our fish are wild (no releases)
+# 1. Perry used Freeport same-day FPT.flow; we use 30-day mean before Benicia
+# 2. This is a single flow value per fish not junction-specific
+# 3. All other differences same as 06_multistate_model_flow.R
 #
 # SIMPLIFIED SURVIVAL STRUCTURE:
-# Baseline model estimated reach-specific Sacramento survival (S_sac1-S_sac5)
-# but all estimates were essentially identical (0.986-0.993) suggesting the
-# data cannot distinguish between reach-specific survival rates. This is
-# expected given only 4 confirmed mortality events in 221 fish over 11 years.
-# We therefore use a single S_sac parameter for all Sacramento reaches,
-# keeping S_geo and S_ss separate as they represent biologically different
-# habitats and movement corridors.
+# Same as baseline and 06 — single S_sac for all Sacramento reaches,
+# separate S_geo and S_ss. Justified by all reach-specific estimates
+# being 0.986-0.993 in baseline model.
 #
 # LOGISTIC REGRESSION ON ROUTING:
-# Following Perry et al. we model routing probabilities as individual-level
-# functions of flow using a logistic regression link:
-#   logit(psi_geo[i]) = alpha_geo + beta_geo * flow_occ2[i]
-#   logit(psi_ss[i])  = alpha_ss  + beta_ss  * flow_occ3[i]
-# where flow_occ2[i] is flow at Rio Vista on the day fish i arrived at the
-# Rio Vista junction (occ2), and flow_occ3[i] is flow on the day fish i
-# arrived at the SR_MOUTH/SS junction (occ3). Both are standardized to
-# mean=0, sd=1.
+# Both routing probabilities use the same 30-day antecedent flow covariate:
+#   logit(psi_geo[i]) = alpha_geo + beta_geo * flow_30day[i]
+#   logit(psi_ss[i])  = alpha_ss  + beta_ss  * flow_30day[i]
+# where flow_30day[i] is the mean Rio Vista discharge in the 30 days before
+# fish i first passed Benicia/Carquinez, standardized to mean=0, sd=1.
 #
-# PRIORS ON FLOW EFFECTS (following Perry 2018):
-# Perry used Student-t priors with scale sigma=2.5 (tau=0.16) on flow slopes
-# following Gelman's recommendation for logistic regression coefficients.
-# We use Normal(0, sd=1.5) priors which are similar in behavior and more
-# natural in NIMBLE. On the logit scale, sd=1.5 allows routing probabilities
-# to vary substantially with flow while remaining weakly informative.
+# PRIORS: Same as 06_multistate_model_flow.R
+#   alpha: Normal(0, sd=1.5) on logit scale
+#   beta:  Normal(0, sd=1.0) on logit scale
 #
 # INPUTS:
 #   - gs_multistate_data.RData (from 04_multistate_data_prep.R)
 #   - daily_tidalfilter_riovista.csv: USGS tidally-filtered daily discharge
+#   - gs_mcmc_flow_run1.RData: same-day flow model results for comparison
 #
 # OUTPUTS:
-#   - gs_mcmc_flow_run1.RData: MCMC posterior samples
-#   - gs_mcmc_traces_flow_run1.pdf: trace plots
+#   - gs_mcmc_flow_30day_run1.RData: MCMC posterior samples
+#   - gs_mcmc_traces_flow_30day_run1.pdf: trace plots
 #
 # MODEL STRUCTURE:
 #   States: 1=Sacramento, 2=Georgiana, 3=Steamboat/Sutter,
 #           4=Dead (absorbing), 5=Failed migration (absorbing)
 #   Fish: 221 (134 up_complete, 83 up_incomplete, 4 incomplete_dead)
+#
+# NOTE ON flow_occ2/flow_occ3 AS DATA:
+# These are fixed observed covariates with no likelihood distribution.
+# They are passed as data (not constants) so they can be updated via
+# nimMod$setData() without recompiling — useful for sensitivity analyses
+# comparing different flow metrics. NIMBLE treats undeclared data nodes
+# as fixed observed values when they only appear in deterministic (<-) 
+# expressions, which is the case here.
 #==============================================================================
 
 #==============================================================================
@@ -117,216 +130,169 @@ cat("Total fish:", nrow(ch_mat_nimble), "\n")
 print(table(detection_history$status))
 
 #==============================================================================
-# SECTION 3: BUILD FLOW COVARIATES
+# SECTION 3: BUILD 30-DAY ANTECEDENT FLOW COVARIATE
 #
-# APPROACH (following Perry et al. 2018 FPT.flow method):
-# Assign each fish the flow at Rio Vista on the date it first arrived at
-# each junction occasion. This directly links the routing decision to the
-# hydrological conditions the fish experienced at the moment of decision.
+# APPROACH:
+# Assign each fish the mean Rio Vista discharge in the 30 days BEFORE it
+# first passed Benicia/Carquinez (migration entry point). This is a single
+# flow value per fish representing the hydrological context during the period
+# when the fish was staging in the estuary and committing to migrate.
 #
-# Perry's exact implementation used cumulative travel time to assign each
-# fish its flow at each occasion: FPT.flow[FPT.index[i,t]] where FPT.index
-# maps fish i's arrival time at occasion t to the daily flow vector.
-# We replicate this using observed first detection dates at each occasion.
+# This differs from 06_multistate_model_flow.R which used same-day flow at
+# each junction (two values per fish, junction-specific). Here we use one
+# value per fish applied to both routing decisions (psi_geo and psi_ss).
 #
-# TWO JUNCTION-SPECIFIC FLOW COVARIATES:
+# RATIONALE FOR SAME COVARIATE FOR BOTH JUNCTIONS:
+# Unlike same-day junction flow (which should logically differ between the
+# Geo junction at occ2 and SS junction at occ3), the 30-day antecedent
+# window before Benicia is the same for both routing decisions for a given
+# fish. This is a simplification but is appropriate given:
+# 1. The 30-day window predates both junctions for all fish
+# 2. It represents the migration initiation context not junction-specific cues
+# 3. Using the same covariate for both keeps the model parsimonious
 #
-# flow_occ2[i]: flow at Rio Vista on date fish i first arrived at occ2
-#   - occ2 is the Rio Vista junction where fish choose Georgiana vs Sacramento
-#   - This is the flow at the time of the Georgiana routing decision
-#   - Used as predictor for psi_geo[i]
-#   - Fish not detected at occ2 (failed migrants that never reached Rio Vista)
-#     get flow_occ2 = 0 (mean flow) as a placeholder — these fish do not
-#     contribute to the psi_geo likelihood anyway
+# WINDOW DEFINITION:
+# 30 days = days [-30, -1] before date of first Benicia/Carquinez detection
+# Day 0 (Benicia passage date) NOT included — fish already committed at this
+# point. We want the conditions that drove the decision to start migrating.
 #
-# flow_occ3[i]: flow at Rio Vista on date fish i first arrived at occ3
-#   - occ3 is the SR_MOUTH/SS junction where fish choose SS vs Sacramento
-#   - This is the flow at the time of the SS routing decision
-#   - Used as predictor for psi_ss[i]
-#   - Same imputation logic for fish that never reached occ3
-#
-# NOTE: We use the first detection at the COMMITTED ROUTE receivers, not
-# the first detection at any occ2/occ3 receiver. This is consistent with
-# last(state) detection history construction and avoids assigning flow
-# from exploratory staging behavior to the routing decision.
+# IMPUTATION:
+# Fish with no Benicia date get flow_30day = 0 (standardized mean)
+# NIMBLE requires fully numeric constants — NA not permitted
 #==============================================================================
 
 # Load Rio Vista flow data
 rv_flow <- read.csv("C:/Users/eetracy/Desktop/Post_doc_GS/daily_tidalfilter_riovista.csv")
 
-# Clean flow data - keep only study period
+# Clean flow data — need extra buffer before WY2007 for 30-day windows
 rv_flow_clean <- rv_flow %>%
   mutate(date = as.Date(time)) %>%
   dplyr::select(date, flow_cfs = value) %>%
   filter(!is.na(flow_cfs),
-         date >= as.Date("2006-10-01"),   # start of WY2007
-         date <= as.Date("2017-09-30")) %>%  # end of WY2017
+         date >= as.Date("2006-09-01"),   # buffer for early WY2007 migrants
+         date <= as.Date("2017-09-30")) %>%
   arrange(date)
 
 cat("Flow data days:", nrow(rv_flow_clean), "\n")
 cat("Missing flow values:", sum(is.na(rv_flow_clean$flow_cfs)), "\n")
 
-# CHECK: identify any gaps in the daily flow record
-# These are dates where the gauge has no data — fish arriving on gap dates
-# will get NA flow values and need to be handled by interpolation below
+# Check for gaps in flow record
 rv_flow_clean %>%
   mutate(gap_after = as.numeric(lead(date) - date)) %>%
   filter(gap_after > 1) %>%
   dplyr::select(date, flow_cfs, gap_after) %>%
-  mutate(gap_start = date + 1,
-         gap_end   = date + gap_after - 1) %>%
+  mutate(gap_start = date + 1, gap_end = date + gap_after - 1) %>%
   print()
 
 # Fill gaps with linear interpolation
-# Rationale: gaps are short (confirmed above) so linear interpolation
-# between adjacent known values is a reasonable approximation
-# Only 1 fish (GS0118 WY2007, arrival 2007-05-21) falls in a gap
 library(zoo)
 rv_flow_complete <- rv_flow_clean %>%
   tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
   mutate(flow_cfs = zoo::na.approx(flow_cfs, na.rm = FALSE))
 
-cat("Days before interpolation:", nrow(rv_flow_clean), "\n")
 cat("Days after interpolation:", nrow(rv_flow_complete), "\n")
 cat("Remaining NAs:", sum(is.na(rv_flow_complete$flow_cfs)), "\n")
 
-# Then use rv_flow_complete (not rv_flow_clean) for all subsequent joins
-
-
-# Get first detection date at each junction for each fish
-# Using the committed route state to be consistent with detection history
-# i.e. for a Geo fish at occ2, use first Geo detection date
-#      for a Sac fish at occ2, use first Rio Vista Sacramento detection date
-junction_dates <- model1_events %>%
-  filter(occasion %in% c(2, 3), !is.na(state)) %>%
-  arrange(animal_id, water_year, occasion, first_detection) %>%
-  group_by(animal_id, water_year, occasion) %>%
+# Get Benicia passage date for each fish — anchor for 30-day window
+benicia_dates <- model1_events %>%
+  filter(receiver_group %in% c("benicia", "carquinez")) %>%
+  group_by(animal_id, water_year) %>%
   dplyr::summarise(
-    # Get arrival date at the committed route state
-    # last(state) matches the detection history coding
-    committed_state = last(state),
-    arrival_date = as.Date(min(first_detection[state == last(state)])),
+    benicia_date = as.Date(min(first_detection)),
     .groups = "drop"
-  ) %>%
-  tidyr::pivot_wider(
-    names_from  = occasion,
-    values_from = c(arrival_date, committed_state),
-    names_sep   = "_occ"
   )
 
-# Join flow on date of arrival at each junction
-# Following Perry: flow[i] = daily flow on date fish i arrived at occasion t
+cat("Fish with Benicia dates:", nrow(benicia_dates), "\n")
+
+# Calculate 30-day mean flow before Benicia passage
 fish_flow <- detection_history %>%
   dplyr::select(animal_id, water_year) %>%
-  left_join(junction_dates, by = c("animal_id", "water_year")) %>%
+  left_join(benicia_dates, by = c("animal_id", "water_year")) %>%
   rowwise() %>%
   mutate(
-    
-    # flow_occ2: flow on date fish arrived at Rio Vista junction
-    # This is the flow conditions when Georgiana routing decision was made
-    flow_occ2_raw = {
-      idx <- which(rv_flow_complete$date == arrival_date_occ2)
-      if(length(idx) == 0) NA_real_ else rv_flow_complete$flow_cfs[idx]
+    flow_30day_raw = {
+      if(is.na(benicia_date)) {
+        NA_real_
+      } else {
+        window_flow <- rv_flow_complete$flow_cfs[
+          rv_flow_complete$date >= (benicia_date - 30) &
+            rv_flow_complete$date <   benicia_date
+        ]
+        if(length(window_flow) == 0) NA_real_ else mean(window_flow, na.rm = TRUE)
+      }
     },
-    
-    # flow_occ3: flow on date fish arrived at SR_MOUTH/SS junction
-    # This is the flow conditions when SS routing decision was made
-    flow_occ3_raw = {
-      idx <- which(rv_flow_complete$date == arrival_date_occ3)
-      if(length(idx) == 0) NA_real_ else rv_flow_complete$flow_cfs[idx]
+    n_days_in_window = {
+      if(is.na(benicia_date)) 0L else
+        sum(rv_flow_complete$date >= (benicia_date - 30) &
+              rv_flow_complete$date <   benicia_date &
+              !is.na(rv_flow_complete$flow_cfs))
     }
-    
   ) %>%
   ungroup()
 
-cat("Missing flow_occ2:", sum(is.na(fish_flow$flow_occ2_raw)), "\n")
-cat("Missing flow_occ3:", sum(is.na(fish_flow$flow_occ3_raw)), "\n")
+cat("Missing flow_30day:", sum(is.na(fish_flow$flow_30day_raw)), "\n")
+cat("Window size summary:\n")
+print(table(fish_flow$n_days_in_window))
 
-# Standardize flow following Perry et al.
-# Using same mean and SD for both covariates so coefficients are comparable
-# Standardizing to mean=0, sd=1 so:
-#   flow_std = 0  -> average flow conditions
-#   flow_std > 0  -> above average (wet year/high discharge)
-#   flow_std < 0  -> below average (dry year/low discharge)
-# This also improves MCMC mixing and makes beta coefficients directly
-# interpretable as change in log-odds per SD of flow
-
-# Compute scaling using all non-missing flow values from both occasions
-all_flow_vals <- c(fish_flow$flow_occ2_raw, fish_flow$flow_occ3_raw)
-flow_mean <- mean(all_flow_vals, na.rm = TRUE)
-flow_sd   <- sd(all_flow_vals, na.rm = TRUE)
+# Standardize to mean=0, sd=1
+flow_mean <- mean(fish_flow$flow_30day_raw, na.rm = TRUE)
+flow_sd   <- sd(fish_flow$flow_30day_raw,   na.rm = TRUE)
 
 fish_flow <- fish_flow %>%
-  mutate(
-    flow_occ2_std = (flow_occ2_raw - flow_mean) / flow_sd,
-    flow_occ3_std = (flow_occ3_raw - flow_mean) / flow_sd
-  )
+  mutate(flow_30day_std = (flow_30day_raw - flow_mean) / flow_sd)
 
-cat("\nFlow covariate summary:\n")
-cat("Scaling mean:", round(flow_mean, 0), "cfs\n")
-cat("Scaling SD:", round(flow_sd, 0), "cfs\n")
-cat("flow_occ2 range:", round(range(fish_flow$flow_occ2_std, na.rm = TRUE), 2), "\n")
-cat("flow_occ3 range:", round(range(fish_flow$flow_occ3_std, na.rm = TRUE), 2), "\n")
+cat("\n30-day antecedent flow summary:\n")
+cat("Mean raw flow:", round(flow_mean, 0), "cfs\n")
+cat("SD raw flow:", round(flow_sd, 0), "cfs\n")
+cat("Standardized range:",
+    round(range(fish_flow$flow_30day_std, na.rm = TRUE), 2), "\n")
 
-# Verify row order matches detection_history before extracting vectors
+# Verify row order matches detection_history
 identical(fish_flow$animal_id, detection_history$animal_id)
-identical(as.numeric(fish_flow$water_year), as.numeric(detection_history$water_year))
+identical(as.numeric(fish_flow$water_year),
+          as.numeric(detection_history$water_year))
 
-# Extract flow vectors for NIMBLE
-# Impute 0 (mean flow) for fish missing junction dates
-# Rationale: fish that never reached a junction do not contribute to the
-# routing likelihood for that junction, so the flow value does not affect
-# parameter estimates. Using 0 (mean) is a neutral placeholder.
-flow_occ2 <- fish_flow$flow_occ2_std
-flow_occ3 <- fish_flow$flow_occ3_std
-flow_occ2[is.na(flow_occ2)] <- 0
-flow_occ3[is.na(flow_occ3)] <- 0
+# Extract single flow vector for NIMBLE
+# Used for both psi_geo and psi_ss — same antecedent conditions for both
+flow_30day <- fish_flow$flow_30day_std
+flow_30day[is.na(flow_30day)] <- 0   # impute mean for fish missing Benicia date
 
-cat("\nFinal flow vectors:\n")
-cat("flow_occ2 - n fish:", length(flow_occ2),
-    "| NAs imputed:", sum(is.na(fish_flow$flow_occ2_std)), "\n")
-cat("flow_occ3 - n fish:", length(flow_occ3),
-    "| NAs imputed:", sum(is.na(fish_flow$flow_occ3_std)), "\n")
+cat("\nFinal flow vector:\n")
+cat("n fish:", length(flow_30day), "\n")
+cat("NAs imputed to 0:", sum(is.na(fish_flow$flow_30day_std)), "\n")
+cat("Range:", round(range(flow_30day), 2), "\n")
 
-# Distribution of real (non-imputed) flow values
-par(mfrow = c(1,2))
-hist(flow_occ2[!is.na(fish_flow$flow_occ2_std)],
-     main = "Flow at occ2 junction\n(Georgiana decision, non-imputed)",
-     xlab = "Standardized flow (cfs)",
-     col = "steelblue")
-abline(v = 0, lty = 2, col = "red")
-hist(flow_occ3[!is.na(fish_flow$flow_occ3_std)],
-     main = "Flow at occ3 junction\n(SS decision, non-imputed)",
-     xlab = "Standardized flow (cfs)",
-     col = "forestgreen")
+hist(flow_30day[!is.na(fish_flow$flow_30day_std)],
+     main = "30-day mean flow before Benicia (standardized, non-imputed)",
+     xlab = "Standardized flow",
+     col  = "steelblue")
 abline(v = 0, lty = 2, col = "red")
 
 #==============================================================================
 # SECTION 4: VERIFY FLOW COVARIATE MAKES BIOLOGICAL SENSE
-# Check that flow at each junction varies meaningfully across water years
+# Check that 30-day antecedent flow varies meaningfully across water years
 # and that observed patterns match exploratory analysis:
 #   - SS use DECREASES with flow (confirmed by route quartile plot)
 #   - Geo is relatively flow-independent
+# Also compare to same-day junction flow from 06 to understand differences
 #==============================================================================
 
-# Mean flow by water year at each junction
-cat("Mean flow at occ2 (Geo decision) by water year:\n")
+# Mean 30-day flow by water year - 2016-2017 should be highest (wet years)
+cat("Mean 30-day antecedent flow by water year:\n")
 fish_flow %>%
-  filter(!is.na(flow_occ2_std)) %>%
-  left_join(detection_history %>%
-              dplyr::select(animal_id, water_year),
-            by = c("animal_id", "water_year")) %>%
+  filter(!is.na(flow_30day_std)) %>%
   group_by(water_year) %>%
   dplyr::summarise(
-    n_fish = n(),
-    mean_flow_std = round(mean(flow_occ2_std), 2),
-    mean_flow_cfs = round(mean(flow_occ2_raw), 0),
+    n_fish        = n(),
+    mean_flow_std = round(mean(flow_30day_std), 2),
+    mean_flow_cfs = round(mean(flow_30day_raw), 0),
     .groups = "drop"
   ) %>%
   arrange(water_year) %>%
   print()
 
 # Flow by route taken - check expected direction
+# SS fish should show LOWER antecedent flow than average
 fish_flow %>%
   left_join(
     detection_history %>% dplyr::select(animal_id, water_year, occ_2, occ_3),
@@ -335,16 +301,16 @@ fish_flow %>%
   mutate(
     route = case_when(
       occ_2 == 2 ~ "Georgiana",
-      occ_3 == 3 ~ "Steamboat/Sutter",
+      occ_3 == 4 ~ "Steamboat/Sutter",
       TRUE       ~ "Sacramento"
     )
   ) %>%
   group_by(route) %>%
   dplyr::summarise(
-    n              = n(),
-    mean_flow_occ2 = round(mean(flow_occ2_std, na.rm = TRUE), 2),
-    mean_flow_occ3 = round(mean(flow_occ3_std, na.rm = TRUE), 2),
-    .groups        = "drop"
+    n                = n(),
+    mean_flow_30day  = round(mean(flow_30day_std, na.rm = TRUE), 2),
+    sd_flow_30day    = round(sd(flow_30day_std,   na.rm = TRUE), 2),
+    .groups          = "drop"
   )
 
 #==============================================================================
@@ -520,7 +486,6 @@ if(sum(is.nan(all_ll)) > 0){
 # All other parameters use flat dbeta(1,1) priors as in baseline model
 #==============================================================================
 
-
 nimCode_flow <- nimbleCode({
   
   #--- PRIORS ---
@@ -561,19 +526,18 @@ nimCode_flow <- nimbleCode({
   beta_ss  ~ dnorm(0, sd = 1.0)
   
   #--- INDIVIDUAL-LEVEL ROUTING PROBABILITIES ---
-  # Each fish gets its own routing probability based on flow at its junction
-  # This is the key addition relative to the baseline model
+  # Each fish gets its own routing probability based on 30-day antecedent flow
+  # Same flow value used for both psi_geo and psi_ss — single covariate per fish
+  # This differs from 06 where junction-specific flow was used
   for(i in 1:nfish){
     
     # Georgiana routing probability for fish i
-    # Uses flow at Rio Vista on day fish i arrived at occ2 (Rio Vista junction)
-    # Following Perry: FPT.flow[FPT.index[i, occ2]]
-    psi_geo[i] <- ilogit(alpha_geo + beta_geo * flow_occ2[i])
+    # Uses 30-day mean flow before fish i passed Benicia
+    psi_geo[i] <- ilogit(alpha_geo + beta_geo * flow_30day[i])
     
     # Steamboat/Sutter routing probability for fish i
-    # Uses flow at Rio Vista on day fish i arrived at occ3 (SR_MOUTH junction)
-    # Following Perry: FPT.flow[FPT.index[i, occ3]]
-    psi_ss[i]  <- ilogit(alpha_ss  + beta_ss  * flow_occ3[i])
+    # Same antecedent flow covariate — represents migration initiation context
+    psi_ss[i]  <- ilogit(alpha_ss  + beta_ss  * flow_30day[i])
     
   } #end i loop for individual routing probabilities
   
@@ -638,6 +602,7 @@ nimCode_flow <- nimbleCode({
   p_arr[5, 1:6, 7] <- c(0, 0, 0, 0, 1, 0)
   p_arr[6, 1:6, 7] <- c(0, 0, 0, 0, 0, 1)
   
+  #--- LIKELIHOOD ---
   #--- LIKELIHOOD ---
   # tr_arr_i is now a 4D array [fish, from_state, to_state, transition]
   # This correctly gives each fish its own transition matrix
@@ -740,14 +705,12 @@ inits_flow <- list(
 nimMod_flow <- nimbleModel(
   code      = nimCode_flow,
   inits     = inits_flow,
-  data      = list(ch_mat = ch_mat_nimble,
-                   flow_occ2 = flow_occ2,   # flow at Rio Vista on date of occ2 arrival
-                   flow_occ3 = flow_occ3), # flow at Rio Vista on date of occ3 arrival
+  data      = list(ch_mat = ch_mat_nimble),
   constants = list(
-    nfish     = nrow(ch_mat_nimble))
+    nfish      = nrow(ch_mat_nimble),
+    flow_30day = flow_30day
   )
-
-
+)
 nimMod_flow$calculate()
 
 inits_fn_flow <- function(){
@@ -796,6 +759,15 @@ CMCMC_flow  <- compileNimble(MCMC_flow, project = CModel_flow)
 #==============================================================================
 # SECTION 9: RUN MCMC AND SAVE RESULTS
 #==============================================================================
+
+# Short test run first
+# mcmc_test_flow <- runMCMC(CMCMC_flow, niter = 1000, nchains = 1,
+#                           nburnin = 100, thin = 1,
+#                           inits = list(inits_fn_flow()),
+#                           samplesAsCodaMCMC = TRUE)
+# MCMCsummary(mcmc_test_flow, round = 3)
+
+# Full run
 mcmc_out_flow <- runMCMC(
   CMCMC_flow,
   niter   = 50000,
@@ -808,92 +780,123 @@ mcmc_out_flow <- runMCMC(
 
 MCMCsummary(mcmc_out_flow, round = 3)
 
-
-save(mcmc_out_flow, flow_occ2, flow_occ3, fish_flow,
-     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_run1.RData")
+save(mcmc_out_flow, flow_30day, fish_flow,
+     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_30day_run1.RData")
 
 MCMCtrace(mcmc_out_flow,
           params   = c("alpha_geo", "alpha_ss", "beta_geo", "beta_ss",
                        "phi_fail", "lambda"),
           pdf      = TRUE,
-          filename = "gs_mcmc_traces_flow_run1",
+          filename = "gs_mcmc_traces_flow_30day_run1",
           ind      = TRUE,
           Rhat     = TRUE,
           n.eff    = TRUE)
 
 #==============================================================================
-# SECTION 10: INTERPRET FLOW RESULTS
-# Run after MCMC completes
+# SECTION 10: INTERPRET AND COMPARE RESULTS
+# Compare 30-day antecedent flow model (this script) with
+# same-day junction flow model (06_multistate_model_flow.R)
+# Run after both MCMC runs are complete
 #==============================================================================
 
-flow_summary <- MCMCsummary(mcmc_out_flow, round = 3,
-                            params = c("alpha_geo", "alpha_ss",
-                                       "beta_geo", "beta_ss"))
-print(flow_summary)
+# Load same-day flow model results for comparison
+load("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_run1.RData")
+mcmc_sameday <- mcmc_out_flow
 
-# Back-transform intercepts to routing probabilities at mean flow
-# alpha -> ilogit(alpha) = psi at mean flow (flow_std = 0)
-# Compare to baseline model fixed estimates
-cat("\nRouting probabilities at mean flow (flow_std = 0):\n")
-alpha_geo_post <- MCMCpstr(mcmc_out_flow, params = "alpha_geo",
-                           func = mean)[[1]]
-alpha_ss_post  <- MCMCpstr(mcmc_out_flow, params = "alpha_ss",
-                           func = mean)[[1]]
-beta_geo_post  <- MCMCpstr(mcmc_out_flow, params = "beta_geo",
-                           func = mean)[[1]]
-beta_ss_post   <- MCMCpstr(mcmc_out_flow, params = "beta_ss",
-                           func = mean)[[1]]
+# Load 30-day model results
+load("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_30day_run1.RData")
+mcmc_30day <- mcmc_out_flow
 
-cat("psi_geo at mean flow:", round(plogis(alpha_geo_post), 3),
-    "(baseline: 0.124)\n")
-cat("psi_ss at mean flow:", round(plogis(alpha_ss_post), 3),
-    "(baseline: 0.374)\n")
-cat("beta_geo:", round(beta_geo_post, 3),
-    "-> flow effect on Geo routing\n")
-cat("beta_ss:", round(beta_ss_post, 3),
-    "-> flow effect on SS routing (expected negative)\n")
+# Compare flow parameter estimates side by side
+cat("=== FLOW MODEL COMPARISON ===\n\n")
+cat("Same-day junction flow model (06):\n")
+MCMCsummary(mcmc_sameday, round = 3,
+            params = c("alpha_geo", "alpha_ss", "beta_geo", "beta_ss"))
 
-# Predict routing probabilities across range of observed flows
-# Back-transform to probability scale for plotting
-flow_range <- seq(min(flow_occ2[flow_occ2 != 0]),
-                  max(flow_occ2),
-                  length.out = 100)
+cat("\n30-day antecedent flow model (06b):\n")
+MCMCsummary(mcmc_30day, round = 3,
+            params = c("alpha_geo", "alpha_ss", "beta_geo", "beta_ss"))
 
-psi_geo_pred <- plogis(alpha_geo_post + beta_geo_post * flow_range)
-psi_ss_pred  <- plogis(alpha_ss_post  + beta_ss_post  * flow_range)
+# Back-transform intercepts from both models
+alpha_geo_sd  <- MCMCpstr(mcmc_sameday, params = "alpha_geo", func = mean)[[1]]
+alpha_ss_sd   <- MCMCpstr(mcmc_sameday, params = "alpha_ss",  func = mean)[[1]]
+beta_geo_sd   <- MCMCpstr(mcmc_sameday, params = "beta_geo",  func = mean)[[1]]
+beta_ss_sd    <- MCMCpstr(mcmc_sameday, params = "beta_ss",   func = mean)[[1]]
 
-# Convert standardized flow back to cfs for x-axis
-flow_range_cfs <- flow_range * flow_sd + flow_mean
+alpha_geo_30  <- MCMCpstr(mcmc_30day,   params = "alpha_geo", func = mean)[[1]]
+alpha_ss_30   <- MCMCpstr(mcmc_30day,   params = "alpha_ss",  func = mean)[[1]]
+beta_geo_30   <- MCMCpstr(mcmc_30day,   params = "beta_geo",  func = mean)[[1]]
+beta_ss_30    <- MCMCpstr(mcmc_30day,   params = "beta_ss",   func = mean)[[1]]
 
-par(mfrow = c(1, 2))
+cat("\n=== ROUTING PROBABILITIES AT MEAN FLOW ===\n")
+cat(sprintf("%-35s %8s %8s\n", "Parameter", "SameDay", "30-Day"))
+cat(sprintf("%-35s %8.3f %8.3f\n", "psi_geo at mean flow",
+            plogis(alpha_geo_sd), plogis(alpha_geo_30)))
+cat(sprintf("%-35s %8.3f %8.3f\n", "psi_ss at mean flow",
+            plogis(alpha_ss_sd), plogis(alpha_ss_30)))
+cat(sprintf("%-35s %8.3f %8.3f\n", "beta_geo (flow slope)",
+            beta_geo_sd, beta_geo_30))
+cat(sprintf("%-35s %8.3f %8.3f\n", "beta_ss (flow slope)",
+            beta_ss_sd, beta_ss_30))
+cat(sprintf("%-35s %8s %8s\n", "Baseline psi_geo", "0.124", "0.124"))
+cat(sprintf("%-35s %8s %8s\n", "Baseline psi_ss",  "0.374", "0.374"))
 
-plot(flow_range_cfs, psi_ss_pred,
+# Plot routing curves for both models side by side
+flow_range <- seq(-2, 6, length.out = 100)
+flow_range_cfs_sd <- flow_range * flow_sd + flow_mean
+
+# For 30-day model use same scaling
+flow_mean_30 <- mean(fish_flow$flow_30day_raw, na.rm = TRUE)
+flow_sd_30   <- sd(fish_flow$flow_30day_raw,   na.rm = TRUE)
+flow_range_cfs_30 <- flow_range * flow_sd_30 + flow_mean_30
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+
+# Same-day: SS routing
+plot(flow_range_cfs_sd,
+     plogis(alpha_ss_sd + beta_ss_sd * flow_range),
      type = "l", col = "forestgreen", lwd = 2,
      ylim = c(0, 0.8),
-     xlab = "30-day mean flow at junction (cfs)",
-     ylab = "Routing probability",
-     main = "Steamboat/Sutter routing vs flow")
+     xlab = "Flow at junction (cfs)",
+     ylab = "P(Steamboat/Sutter)",
+     main = "SS routing — same-day junction flow")
 abline(h = 0.374, lty = 2, col = "gray50")
-legend("topright", c("Flow model (posterior mean)", "Baseline estimate"),
-       lty = c(1, 2), col = c("forestgreen", "gray50"), cex = 0.8)
+legend("topright", c("Flow model", "Baseline"),
+       lty = c(1,2), col = c("forestgreen","gray50"), cex = 0.8)
 
-plot(flow_range_cfs, psi_geo_pred,
+# Same-day: Geo routing
+plot(flow_range_cfs_sd,
+     plogis(alpha_geo_sd + beta_geo_sd * flow_range),
      type = "l", col = "orange", lwd = 2,
      ylim = c(0, 0.4),
-     xlab = "30-day mean flow at junction (cfs)",
-     ylab = "Routing probability",
-     main = "Georgiana routing vs flow")
+     xlab = "Flow at junction (cfs)",
+     ylab = "P(Georgiana)",
+     main = "Geo routing — same-day junction flow")
 abline(h = 0.124, lty = 2, col = "gray50")
-legend("topright", c("Flow model (posterior mean)", "Baseline estimate"),
-       lty = c(1, 2), col = c("orange", "gray50"), cex = 0.8)
+legend("topright", c("Flow model", "Baseline"),
+       lty = c(1,2), col = c("orange","gray50"), cex = 0.8)
 
+# 30-day: SS routing
+plot(flow_range_cfs_30,
+     plogis(alpha_ss_30 + beta_ss_30 * flow_range),
+     type = "l", col = "forestgreen", lwd = 2,
+     ylim = c(0, 0.8),
+     xlab = "30-day mean flow before Benicia (cfs)",
+     ylab = "P(Steamboat/Sutter)",
+     main = "SS routing — 30-day antecedent flow")
+abline(h = 0.374, lty = 2, col = "gray50")
+legend("topright", c("Flow model", "Baseline"),
+       lty = c(1,2), col = c("forestgreen","gray50"), cex = 0.8)
 
-# Predictions at observed flow percentiles
-flow_quantiles_std <- quantile(flow_occ2[flow_occ2 != 0], 
-                               probs = c(0.25, 0.50, 0.75))
-flow_quantiles_cfs <- flow_quantiles_std * flow_sd + flow_mean
+# 30-day: Geo routing
+plot(flow_range_cfs_30,
+     plogis(alpha_geo_30 + beta_geo_30 * flow_range),
+     type = "l", col = "orange", lwd = 2,
+     ylim = c(0, 0.4),
+     xlab = "30-day mean flow before Benicia (cfs)",
+     ylab = "P(Georgiana)",
+     main = "Geo routing — 30-day antecedent flow")
+abline(h = 0.124, lty = 2, col = "gray50")
+legend("topright", c("Flow model", "Baseline"),
+       lty = c(1,2), col = c("orange","gray50"), cex = 0.8)
 
-cat("Predictions at observed flow percentiles:\n")
-cat("Flow (cfs):", round(flow_quantiles_cfs), "\n")
-cat("psi_geo:   ", round(plogis(alpha_geo_post + beta_geo_post * flow_quantiles_std), 3), "\n")
-cat("psi_ss:    ", round(plogis(alpha_ss_post  + beta_ss_post  * flow_quantiles_std), 3), "\n")
