@@ -155,7 +155,7 @@ print(table(detection_history$status))
 rv_flow <- read.csv("C:/Users/eetracy/Desktop/Post_doc_GS/daily_tidalfilter_riovista.csv")
 
 # Clean flow data - keep only study period
-rv_flow_clean <- rv_flow %>%
+rv_flow_complete <- rv_flow %>%
   mutate(date = as.Date(time)) %>%
   dplyr::select(date, flow_cfs = value) %>%
   filter(!is.na(flow_cfs),
@@ -163,13 +163,13 @@ rv_flow_clean <- rv_flow %>%
          date <= as.Date("2017-09-30")) %>%  # end of WY2017
   arrange(date)
 
-cat("Flow data days:", nrow(rv_flow_clean), "\n")
-cat("Missing flow values:", sum(is.na(rv_flow_clean$flow_cfs)), "\n")
+cat("Flow data days:", nrow(rv_flow_complete), "\n")
+cat("Missing flow values:", sum(is.na(rv_flow_complete$flow_cfs)), "\n")
 
 # CHECK: identify any gaps in the daily flow record
 # These are dates where the gauge has no data — fish arriving on gap dates
 # will get NA flow values and need to be handled by interpolation below
-rv_flow_clean %>%
+rv_flow_complete %>%
   mutate(gap_after = as.numeric(lead(date) - date)) %>%
   filter(gap_after > 1) %>%
   dplyr::select(date, flow_cfs, gap_after) %>%
@@ -191,6 +191,41 @@ cat("Days after interpolation:", nrow(rv_flow_complete), "\n")
 cat("Remaining NAs:", sum(is.na(rv_flow_complete$flow_cfs)), "\n")
 
 # Then use rv_flow_complete (not rv_flow_clean) for all subsequent joins
+
+geo_flow <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/flow/RioVista_Confluence_Flows.csv")
+library(lubridate)
+
+geo_flow_daily <- geo_flow %>%
+  mutate(date = as.Date(dateTime, format = "%m/%d/%Y %H:%M")) %>%
+  group_by(date) %>%
+  dplyr::summarise(
+    flow_GES        = mean(GES,        na.rm = TRUE),
+    flow_RIO        = mean(RIO,        na.rm = TRUE),
+    flow_RYI_MB_GES = mean(RYI.MB.GES, na.rm = TRUE),
+    flow_RYI_MB_SOI = mean(RYI.MB.SOI, na.rm = TRUE),
+    flow_SXS        = mean(SXS,        na.rm = TRUE),
+    flow_SOI        = mean(SOI,        na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(date),
+         date >= as.Date("2006-10-01"),
+         date <= as.Date("2017-09-30")) %>%
+  arrange(date)
+
+cat("Daily flow rows:", nrow(geo_flow_daily), "\n")
+cat("Date range:", as.character(range(geo_flow_daily$date)), "\n")
+cat("NAs in RYI_MB_GES:", sum(is.na(geo_flow_daily$flow_RYI_MB_GES)), "\n")
+cat("NAs in GES:", sum(is.na(geo_flow_daily$flow_GES)), "\n")
+
+# Interpolate gaps in GES
+geo_flow_daily <- geo_flow_daily %>%
+  tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
+  mutate(flow_GES = zoo::na.approx(flow_GES, na.rm = FALSE))
+
+cat("NAs after interpolation:", sum(is.na(geo_flow_daily$flow_GES)), "\n")
+
+# Check flow ranges look reasonable
+summary(geo_flow_daily$flow_GES)
 
 
 # Get first detection date at each junction for each fish
