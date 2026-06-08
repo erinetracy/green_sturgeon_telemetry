@@ -410,15 +410,16 @@ events <- events %>%
 
 write.csv(events, "C:/Users/eetracy/Desktop/ST_telemetry/events_with_receivergroups_021826.csv", row.names = FALSE)
 
+
 #this has the correct groups from arcgis
 receiver_metadata <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/arc_receivers_update.csv")
 
 #map of receivers
 library(leaflet)
 
-# Get representative coordinates for each receiver group
-route_points <- model1_events %>%
-  filter(receiver_group %in% c("benicia", "carquinez", "sacramento", 
+# Add occasion information to the map
+route_points_occ <- model1_events %>%
+  filter(receiver_group %in% c("benicia", "carquinez", "sacramento",
                                "interior_delta", "georgiana", "DCC",
                                "steamboat_sutter", "spawning_ground")) %>%
   mutate(route = case_when(
@@ -428,26 +429,34 @@ route_points <- model1_events %>%
     receiver_group %in% c("benicia", "carquinez") ~ "Start",
     receiver_group == "sacramento" ~ "Sacramento"
   )) %>%
-  group_by(location, route, receiver_group) %>%
-  summarise(lat = mean(mean_latitude), lng = mean(mean_longitude), .groups = "drop")
+  group_by(location, route, receiver_group, occasion) %>%
+  dplyr::summarise(
+    lat = mean(mean_latitude),
+    lng = mean(mean_longitude),
+    .groups = "drop"
+  )
 
-# Color by route
 pal <- colorFactor(
   palette = c("blue", "orange", "green", "red", "purple"),
-  domain = c("Sacramento", "Interior Delta", "Steamboat/Sutter", "Start", "Spawning Ground")
+  domain  = c("Sacramento", "Interior Delta", "Steamboat/Sutter",
+              "Start", "Spawning Ground")
 )
 
-leaflet(route_points) %>%
+leaflet(route_points_occ) %>%
   addTiles() %>%
   addCircleMarkers(
-    lng = ~lng, lat = ~lat,
-    color = ~pal(route),
-    radius = 5,
-    popup = ~paste(location, "<br>", route),
-    label = ~route
+    lng    = ~lng,
+    lat    = ~lat,
+    color  = ~pal(route),
+    radius = 6,
+    popup  = ~paste0("<b>", location, "</b><br>",
+                     "Route: ", route, "<br>",
+                     "Receiver group: ", receiver_group, "<br>",
+                     "Occasion: ", occasion),
+    label  = ~paste0(location, " (occ", occasion, ")")
   ) %>%
-  addLegend(pal = pal, values = ~route, title = "Route")
-
+  addLegend(pal = pal, values = ~route, title = "Route") %>%
+  addMeasure()  # adds distance measurement tool
 
 #exploratory receiver analysis 
 #doesnt need to be done every time 
@@ -539,3 +548,4 @@ receiver_metadata %>%
   ) %>%
   arrange(relatedcatalogitem, year) %>%
   print(n = 80)
+

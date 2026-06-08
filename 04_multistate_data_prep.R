@@ -567,14 +567,6 @@ route_summary_full <- model1_events %>%
     by = c("animal_id", "water_year")
   )
 
-# Save to csv so you can open in Excel and scroll through
-write.csv(route_summary_full,
-          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/cleaned_data/route_summary_check.csv",
-          row.names = FALSE)
-
-cat("Saved to route_summary_check.csv\n")
-cat("Total fish:", nrow(route_summary_full), "\n")
-
 # Also print full table in R - wide format so set width high
 options(width = 300)
 route_summary_full %>%

@@ -502,6 +502,14 @@ migration_status %>%
   filter(animal_id == "UCDHIST-GS0488-2011-08-10") %>%
   dplyr::select(animal_id, water_year, status)
 
+migration_status <- migration_status %>%
+  mutate(status = case_when(
+    # GS0303 2010: valid upstream migration entering via group 4 after
+    # failed first attempt in Nov 2009. Reached spawning grounds March 2010.
+    animal_id == "UCDHIST-GS0303-2006-06-28" & water_year == 2010 ~ "up_complete",
+    TRUE ~ status
+  ))
+
 # Verify overall counts
 migration_status %>% count(status)
 write.csv(
@@ -530,6 +538,8 @@ duplicate_check <- events %>%
   filter(n() > 1)
 
 cat("Fish x water_year with multiple statuses:", nrow(duplicate_check), "\n")
+
+
 
 #==============================================================================
 # SECTION 6: SAVE
