@@ -400,4 +400,199 @@ nimCode_08 <- nimbleCode({
   p_arr[6, 1:6, 4] <- c(0, 0, 0, 0, 0, 1)
   
   p_arr[1, 1:6, 5] <- c(p_sac5, 0, 0, 0, 0, (1-p_sac5))
-  p_arr[2, 1:6, 5] <- c(0
+  p_arr[2, 1:6, 5] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[3, 1:6, 5] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[4, 1:6, 5] <- c(0, 0, 0, 1, 0, 0)
+  p_arr[5, 1:6, 5] <- c(0, 0, 0, 0, 1, 0)
+  p_arr[6, 1:6, 5] <- c(0, 0, 0, 0, 0, 1)
+  
+  p_arr[1, 1:6, 6] <- c(p_sac6, 0, 0, 0, 0, (1-p_sac6))
+  p_arr[2, 1:6, 6] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[3, 1:6, 6] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[4, 1:6, 6] <- c(0, 0, 0, 1, 0, 0)
+  p_arr[5, 1:6, 6] <- c(0, 0, 0, 0, 1, 0)
+  p_arr[6, 1:6, 6] <- c(0, 0, 0, 0, 0, 1)
+  
+  p_arr[1, 1:6, 7] <- c(1, 0, 0, 0, 0, 0)
+  p_arr[2, 1:6, 7] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[3, 1:6, 7] <- c(0, 0, 0, 0, 0, 1)
+  p_arr[4, 1:6, 7] <- c(0, 0, 0, 1, 0, 0)
+  p_arr[5, 1:6, 7] <- c(0, 0, 0, 0, 1, 0)
+  p_arr[6, 1:6, 7] <- c(0, 0, 0, 0, 0, 1)
+  
+  #--- LIKELIHOOD ---
+  for(i in 1:nfish){
+    
+    # Transition 1->2: Georgiana routing — same-day Rio Vista flow
+    tr_arr_i[i, 1, 1:6, 1] <- c(S_sac*(1-psi_geo[i])*(1-phi_fail[i]),
+                                S_sac*psi_geo[i]*(1-phi_fail[i]),
+                                0, (1-S_sac), S_sac*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 1] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 3, 1:6, 1] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 4, 1:6, 1] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 1] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 1] <- c(0, 0, 0, 0, 0, 1)
+    
+    # Transition 2->3: SS routing — same-day GES flow
+    tr_arr_i[i, 1, 1:6, 2] <- c(S_sac*(1-psi_ss[i])*(1-phi_fail[i]),
+                                0,
+                                S_sac*psi_ss[i]*(1-phi_fail[i]),
+                                (1-S_sac), S_sac*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 2] <- c(0, 1, 0, 0, 0, 0)
+    tr_arr_i[i, 3, 1:6, 2] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 4, 1:6, 2] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 2] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 2] <- c(0, 0, 0, 0, 0, 1)
+    
+    # Transitions 3->7: phi_fail uses 30-day antecedent flow
+    tr_arr_i[i, 1, 1:6, 3] <- c(S_sac*(1-phi_fail[i]), 0, 0,
+                                (1-S_sac), S_sac*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 3] <- c(S_geo*(1-phi_fail[i]), 0, 0,
+                                (1-S_geo), S_geo*phi_fail[i], 0)
+    tr_arr_i[i, 3, 1:6, 3] <- c(0, 0, (1-phi_fail[i]), 0, phi_fail[i], 0)
+    tr_arr_i[i, 4, 1:6, 3] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 3] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 3] <- c(0, 0, 0, 0, 0, 1)
+    
+    tr_arr_i[i, 1, 1:6, 4] <- c(S_sac*(1-phi_fail[i]), 0, 0,
+                                (1-S_sac), S_sac*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 4] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 3, 1:6, 4] <- c(S_ss*(1-phi_fail[i]), 0, 0,
+                                (1-S_ss), S_ss*phi_fail[i], 0)
+    tr_arr_i[i, 4, 1:6, 4] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 4] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 4] <- c(0, 0, 0, 0, 0, 1)
+    
+    tr_arr_i[i, 1, 1:6, 5] <- c(S_sac*(1-phi_fail[i]), 0, 0,
+                                (1-S_sac), S_sac*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 5] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 3, 1:6, 5] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 4, 1:6, 5] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 5] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 5] <- c(0, 0, 0, 0, 0, 1)
+    
+    tr_arr_i[i, 1, 1:6, 6] <- c(lambda*(1-phi_fail[i]), 0, 0,
+                                (1-lambda), lambda*phi_fail[i], 0)
+    tr_arr_i[i, 2, 1:6, 6] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 3, 1:6, 6] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 4, 1:6, 6] <- c(0, 0, 0, 1, 0, 0)
+    tr_arr_i[i, 5, 1:6, 6] <- c(0, 0, 0, 0, 1, 0)
+    tr_arr_i[i, 6, 1:6, 6] <- c(0, 0, 0, 0, 0, 1)
+    
+    ch_mat[i, 1:7] ~ dDHMMo(
+      init         = c(1, 0, 0, 0, 0, 0)[1:6],
+      probObs      = p_arr[1:6, 1:6, 1:7],
+      probTrans    = tr_arr_i[i, 1:6, 1:6, 1:6],
+      len          = 7,
+      checkRowSums = 0
+    )
+    
+  } #end i loop
+})
+
+#==============================================================================
+# SECTION 6: BUILD MODEL AND CONFIGURE MCMC
+#==============================================================================
+
+inits_08 <- list(
+  S_sac      = 0.99, S_geo = 0.95, S_ss = 0.97,
+  p_sac2     = 0.977, p_sac3 = 0.899,
+  p_sac4     = 0.910, p_sac5 = 0.893, p_sac6 = 0.986,
+  p_geo      = 0.771, p_ss   = 0.690,
+  lambda     = 0.986,
+  alpha_geo  = -1.95,
+  alpha_ss   = -0.51,
+  beta_geo   = 0.0,
+  beta_ss    = 0.0,
+  alpha_fail = -2.3,
+  beta_fail  = 0.0
+)
+
+nimMod_08 <- nimbleModel(
+  code      = nimCode_08,
+  inits     = inits_08,
+  data      = list(ch_mat = ch_mat_nimble),
+  constants = list(
+    nfish      = nrow(ch_mat_nimble),
+    flow_occ2  = flow_occ2,
+    flow_occ3  = flow_occ3,
+    flow_30day = flow_30day
+  )
+)
+nimMod_08$calculate()
+
+inits_fn_08 <- function(){
+  list(
+    S_sac      = runif(1, 0.95, 1.0),
+    S_geo      = runif(1, 0.80, 1.0),
+    S_ss       = runif(1, 0.85, 1.0),
+    p_sac2     = runif(1, 0.90, 1.0),
+    p_sac3     = runif(1, 0.75, 0.95),
+    p_sac4     = runif(1, 0.80, 0.95),
+    p_sac5     = runif(1, 0.80, 0.95),
+    p_sac6     = runif(1, 0.95, 1.0),
+    p_geo      = runif(1, 0.50, 0.90),
+    p_ss       = runif(1, 0.50, 0.85),
+    lambda     = runif(1, 0.95, 1.0),
+    alpha_geo  = rnorm(1, mean = -1.95, sd = 0.3),
+    alpha_ss   = rnorm(1, mean = -0.51, sd = 0.3),
+    beta_geo   = rnorm(1, mean = 0, sd = 0.2),
+    beta_ss    = rnorm(1, mean = 0, sd = 0.2),
+    alpha_fail = rnorm(1, mean = -2.3,  sd = 0.3),
+    beta_fail  = rnorm(1, mean = 0, sd = 0.2)
+  )
+}
+
+params_08 <- c(
+  "S_sac", "S_geo", "S_ss",
+  "p_sac2", "p_sac3", "p_sac4", "p_sac5", "p_sac6",
+  "p_geo", "p_ss",
+  "lambda",
+  "alpha_geo", "alpha_ss", "beta_geo", "beta_ss",
+  "alpha_fail", "beta_fail"
+)
+
+confMCMC_08 <- configureMCMC(nimMod_08, onlySlice = TRUE)
+confMCMC_08$addMonitors(params_08)
+MCMC_08   <- buildMCMC(confMCMC_08)
+CModel_08 <- compileNimble(nimMod_08)
+CMCMC_08  <- compileNimble(MCMC_08, project = CModel_08)
+
+#==============================================================================
+# SECTION 7: RUN MCMC AND SAVE
+#==============================================================================
+
+# Short test run first — uncomment to verify
+# mcmc_test_08 <- runMCMC(CMCMC_08, niter = 1000, nchains = 1,
+#                          nburnin = 100, thin = 1,
+#                          inits = list(inits_fn_08()),
+#                          samplesAsCodaMCMC = TRUE)
+# MCMCsummary(mcmc_test_08, round = 3)
+
+mcmc_out_08 <- runMCMC(
+  CMCMC_08,
+  niter   = 50000,
+  nchains = 3,
+  nburnin = 10000,
+  thin    = 10,
+  inits   = list(inits_fn_08(), inits_fn_08(), inits_fn_08()),
+  samplesAsCodaMCMC = TRUE
+)
+
+MCMCsummary(mcmc_out_08, round = 3)
+
+save(mcmc_out_08, flow_occ2, flow_occ3, flow_30day,
+     fish_flow_08,
+     flow_occ2_mean_08, flow_occ2_sd_08,
+     flow_occ3_mean_08, flow_occ3_sd_08,
+     flow_30day_mean_08, flow_30day_sd_08,
+     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_08_run1.RData")
+
+MCMCtrace(mcmc_out_08,
+          params   = c("alpha_geo", "alpha_ss", "beta_geo", "beta_ss",
+                       "alpha_fail", "beta_fail", "lambda"),
+          pdf      = TRUE,
+          filename = "gs_mcmc_traces_flow_08_run1",
+          ind      = TRUE,
+          Rhat     = TRUE,
+          n.eff    = TRUE)
