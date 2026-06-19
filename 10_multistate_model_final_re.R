@@ -1,20 +1,30 @@
 #==============================================================================
-# GREEN STURGEON UPSTREAM MIGRATION MULTISTATE MODEL - 09
-# Script: 09_multistate_model_flow_detection.R
+# GREEN STURGEON UPSTREAM MIGRATION MULTISTATE MODEL - 10
+# Script: 10_multistate_model_final_re.R
 # Author: Erin Tracy
 # Last updated: June 2026
 #
 # PURPOSE:
-# Extension of model 08 testing whether discharge influences detection
-# probability at Steamboat/Sutter Slough arrays (p_ss), following
-# Perry et al. (2018). beta_p_geo dropped after model 09 test showed
-# CI including zero. beta_p_sac3 tested in model 09b and not supported.
+# Final model adding water year random effects on routing probabilities
+# and testing flow-dependent detection at SR_MOUTH (p_sac3) to model 09.
+# beta_p_geo dropped — not supported in model 09 (CI: -2.796 to 0.626).
 #
-# FINAL MODEL STRUCTURE:
-# Routing occ2: psi_geo[i] = ilogit(alpha_geo + beta_geo * flow_occ2[i])
-# Routing occ3: psi_ss[i]  = ilogit(alpha_ss  + beta_ss  * flow_occ3[i])
-# Failure:      phi_fail[i] = ilogit(alpha_fail + beta_fail * flow_30day[i])
-# SS detection: p_ss_i[i]   = ilogit(alpha_p_ss + beta_p_ss * flow_occ3[i])
+# ADDITIONS FROM MODEL 09:
+# 1. Water year random effects on routing intercepts:
+#    logit(psi_geo[i]) = alpha_geo + beta_geo*flow_occ2[i] + eps_geo[year[i]]
+#    logit(psi_ss[i])  = alpha_ss  + beta_ss*flow_occ3[i]  + eps_ss[year[i]]
+#    eps_geo[y] ~ Normal(0, sigma_geo)
+#    eps_ss[y]  ~ Normal(0, sigma_ss)
+# 2. Flow-dependent detection at SR_MOUTH:
+#    logit(p_sac3[i]) = alpha_p_sac3 + beta_p_sac3 * flow_occ2[i]
+# 3. beta_p_geo dropped (not supported in model 09)
+#
+# BIOLOGICAL JUSTIFICATION FOR RANDOM EFFECTS:
+# Water year random effects account for unmeasured annual variation in
+# routing behavior beyond what flow captures — e.g. fish condition,
+# population composition, spawning timing, and receiver array changes.
+# Routing slopes (beta_geo, beta_ss) that remain significant after
+# accounting for year random effects are robust to annual confounding.
 #==============================================================================
 
 #==============================================================================
@@ -31,11 +41,7 @@ library(tidyr)
 library(zoo)
 
 load("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_multistate_data.RData")
-
-# SAFETY CHECK
-stopifnot(all(ch_mat_nimble %in% c(1, 2, 4, 5, 6, 7)))
-cat("ch_mat_nimble pre-recoding values:", 
-    sort(unique(as.vector(ch_mat_nimble))), "\n")
+load("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_09_run1.RData")
 
 #==============================================================================
 # SECTION 2: RECODE DETECTION HISTORY TO 5-STATE MODEL
@@ -44,23 +50,21 @@ cat("ch_mat_nimble pre-recoding values:",
 nstate <- 5
 
 ch_mat_nimble_5state <- ch_mat_nimble
-ch_mat_nimble_5state[ch_mat_nimble == 4] <- 3   # SS: 4->3
-ch_mat_nimble_5state[ch_mat_nimble == 5] <- 4   # dead: 5->4
-ch_mat_nimble_5state[ch_mat_nimble == 6] <- 5   # failed: 6->5
-ch_mat_nimble_5state[ch_mat_nimble == 7] <- 6   # not-detected: 7->6
+ch_mat_nimble_5state[ch_mat_nimble == 4] <- 3
+ch_mat_nimble_5state[ch_mat_nimble == 5] <- 4
+ch_mat_nimble_5state[ch_mat_nimble == 6] <- 5
+ch_mat_nimble_5state[ch_mat_nimble == 7] <- 6
 
 ch_mat_nimble <- ch_mat_nimble_5state
 
-cat("Unique values after recoding:\n")
-print(table(as.vector(ch_mat_nimble)))
-cat("Expected: 1 2 3 4 5 6\n")
 cat("Total fish:", nrow(ch_mat_nimble), "\n")
 print(table(detection_history$status))
 
 #==============================================================================
-# SECTION 3: BUILD FLOW COVARIATES
+# SECTION 3: BUILD FLOW COVARIATES AND WATER YEAR INDEX
 #==============================================================================
 
+# --- Rio Vista flow ---
 rv_flow <- read.csv("C:/Users/eetracy/Desktop/Post_doc_GS/daily_tidalfilter_riovista.csv")
 
 rv_flow_complete <- rv_flow %>%
@@ -73,6 +77,7 @@ rv_flow_complete <- rv_flow %>%
   tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
   mutate(flow_cfs = zoo::na.approx(flow_cfs, na.rm = FALSE))
 
+# --- GES flow ---
 geo_flow <- read.csv("C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/flow/RioVista_Confluence_Flows.csv")
 
 ges_flow_complete <- geo_flow %>%
@@ -86,6 +91,7 @@ ges_flow_complete <- geo_flow %>%
   tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
   mutate(flow_GES = zoo::na.approx(flow_GES, na.rm = FALSE))
 
+# --- Arrival dates ---
 occ2_dates <- model1_events %>%
   filter(occasion == 2) %>%
   group_by(animal_id, water_year) %>%
@@ -101,7 +107,18 @@ benicia_dates <- model1_events %>%
   group_by(animal_id, water_year) %>%
   dplyr::summarise(benicia_date = as.Date(min(first_detection)), .groups = "drop")
 
-fish_flow_09 <- detection_history %>%
+# --- Build water year index ---
+# Maps each fish to an integer water year index for random effects
+water_years <- sort(unique(detection_history$water_year))
+nyears <- length(water_years)
+year_index <- match(detection_history$water_year, water_years)
+
+cat("Water years:", water_years, "\n")
+cat("n years:", nyears, "\n")
+cat("Year index range:", range(year_index), "\n")
+
+# --- Extract flow values ---
+fish_flow_10 <- detection_history %>%
   dplyr::select(animal_id, water_year) %>%
   left_join(occ2_dates,    by = c("animal_id", "water_year")) %>%
   left_join(occ3_dates,    by = c("animal_id", "water_year")) %>%
@@ -131,38 +148,37 @@ fish_flow_09 <- detection_history %>%
   ) %>%
   ungroup()
 
-cat("Missing flow_occ2:", sum(is.na(fish_flow_09$flow_occ2_raw)), "\n")
-cat("Missing flow_occ3:", sum(is.na(fish_flow_09$flow_occ3_raw)), "\n")
-cat("Missing flow_30day:", sum(is.na(fish_flow_09$flow_30day_raw)), "\n")
+# --- Standardize ---
+flow_occ2_mean_10  <- mean(fish_flow_10$flow_occ2_raw,  na.rm = TRUE)
+flow_occ2_sd_10    <- sd(fish_flow_10$flow_occ2_raw,    na.rm = TRUE)
+flow_occ3_mean_10  <- mean(fish_flow_10$flow_occ3_raw,  na.rm = TRUE)
+flow_occ3_sd_10    <- sd(fish_flow_10$flow_occ3_raw,    na.rm = TRUE)
+flow_30day_mean_10 <- mean(fish_flow_10$flow_30day_raw, na.rm = TRUE)
+flow_30day_sd_10   <- sd(fish_flow_10$flow_30day_raw,   na.rm = TRUE)
 
-flow_occ2_mean_09  <- mean(fish_flow_09$flow_occ2_raw,  na.rm = TRUE)
-flow_occ2_sd_09    <- sd(fish_flow_09$flow_occ2_raw,    na.rm = TRUE)
-flow_occ3_mean_09  <- mean(fish_flow_09$flow_occ3_raw,  na.rm = TRUE)
-flow_occ3_sd_09    <- sd(fish_flow_09$flow_occ3_raw,    na.rm = TRUE)
-flow_30day_mean_09 <- mean(fish_flow_09$flow_30day_raw, na.rm = TRUE)
-flow_30day_sd_09   <- sd(fish_flow_09$flow_30day_raw,   na.rm = TRUE)
-
-fish_flow_09 <- fish_flow_09 %>%
+fish_flow_10 <- fish_flow_10 %>%
   mutate(
-    flow_occ2_std  = (flow_occ2_raw  - flow_occ2_mean_09)  / flow_occ2_sd_09,
-    flow_occ3_std  = (flow_occ3_raw  - flow_occ3_mean_09)  / flow_occ3_sd_09,
-    flow_30day_std = (flow_30day_raw - flow_30day_mean_09) / flow_30day_sd_09
+    flow_occ2_std  = (flow_occ2_raw  - flow_occ2_mean_10)  / flow_occ2_sd_10,
+    flow_occ3_std  = (flow_occ3_raw  - flow_occ3_mean_10)  / flow_occ3_sd_10,
+    flow_30day_std = (flow_30day_raw - flow_30day_mean_10) / flow_30day_sd_10
   )
 
-identical(fish_flow_09$animal_id, detection_history$animal_id)
-identical(as.numeric(fish_flow_09$water_year),
+# --- Verify row order ---
+identical(fish_flow_10$animal_id, detection_history$animal_id)
+identical(as.numeric(fish_flow_10$water_year),
           as.numeric(detection_history$water_year))
 
-flow_occ2_09  <- fish_flow_09$flow_occ2_std
-flow_occ3_09  <- fish_flow_09$flow_occ3_std
-flow_30day_09 <- fish_flow_09$flow_30day_std
-flow_occ2_09[is.na(flow_occ2_09)]   <- 0
-flow_occ3_09[is.na(flow_occ3_09)]   <- 0
-flow_30day_09[is.na(flow_30day_09)] <- 0
+# --- Extract vectors ---
+flow_occ2_10  <- fish_flow_10$flow_occ2_std
+flow_occ3_10  <- fish_flow_10$flow_occ3_std
+flow_30day_10 <- fish_flow_10$flow_30day_std
+flow_occ2_10[is.na(flow_occ2_10)]   <- 0
+flow_occ3_10[is.na(flow_occ3_10)]   <- 0
+flow_30day_10[is.na(flow_30day_10)] <- 0
 
-cat("flow_occ2 range:",  round(range(flow_occ2_09),  2), "\n")
-cat("flow_occ3 range:",  round(range(flow_occ3_09),  2), "\n")
-cat("flow_30day range:", round(range(flow_30day_09), 2), "\n")
+cat("flow_occ2 range:",  round(range(flow_occ2_10),  2), "\n")
+cat("flow_occ3 range:",  round(range(flow_occ3_10),  2), "\n")
+cat("flow_30day range:", round(range(flow_30day_10), 2), "\n")
 
 #==============================================================================
 # SECTION 4: PLACEHOLDER MATRICES AND LIKELIHOOD CHECK
@@ -267,10 +283,10 @@ cat("Inf count:", sum(is.infinite(all_ll)), "\n")
 cat("LL range:", range(all_ll[!is.nan(all_ll) & !is.infinite(all_ll)]), "\n")
 
 #==============================================================================
-# SECTION 5: NIMBLE MODEL 09
+# SECTION 5: NIMBLE MODEL 10
 #==============================================================================
 
-nimCode_09 <- nimbleCode({
+nimCode_10 <- nimbleCode({
   
   #--- PRIORS ---
   S_sac    ~ dbeta(1, 1)
@@ -278,7 +294,6 @@ nimCode_09 <- nimbleCode({
   S_ss     ~ dbeta(1, 1)
   
   p_sac2   ~ dbeta(1, 1)
-  p_sac3   ~ dbeta(1, 1)
   p_sac4   ~ dbeta(1, 1)
   p_sac5   ~ dbeta(1, 1)
   p_sac6   ~ dbeta(1, 1)
@@ -286,23 +301,48 @@ nimCode_09 <- nimbleCode({
   
   lambda   ~ dbeta(1, 1)
   
-  alpha_geo  ~ dnorm(0, sd = 1.5)
-  alpha_ss   ~ dnorm(0, sd = 1.5)
-  beta_geo   ~ dnorm(0, sd = 1.0)
-  beta_ss    ~ dnorm(0, sd = 1.0)
+  # Routing — same-day gauge-specific flow
+  alpha_geo ~ dnorm(0, sd = 1.5)
+  alpha_ss  ~ dnorm(0, sd = 1.5)
+  beta_geo  ~ dnorm(0, sd = 1.0)
+  beta_ss   ~ dnorm(0, sd = 1.0)
   
+  # Water year random effects on routing
+  sigma_geo ~ dunif(0, 3)
+  sigma_ss  ~ dunif(0, 3)
+  for(y in 1:nyears){
+    eps_geo[y] ~ dnorm(0, sd = sigma_geo)
+    eps_ss[y]  ~ dnorm(0, sd = sigma_ss)
+  }
+  
+  # Failure — 30-day antecedent flow
   alpha_fail ~ dnorm(0, sd = 1.5)
   beta_fail  ~ dnorm(0, sd = 1.0)
   
-  alpha_p_ss ~ dnorm(0, sd = 1.5)
-  beta_p_ss  ~ dnorm(0, sd = 1.0)
+  # Flow-dependent detection — SS only (supported in model 09)
+  alpha_p_ss   ~ dnorm(0, sd = 1.5)
+  beta_p_ss    ~ dnorm(0, sd = 1.0)
+  
+  # Flow-dependent detection — SR_MOUTH (new test)
+  alpha_p_sac3 ~ dnorm(0, sd = 1.5)
+  beta_p_sac3  ~ dnorm(0, sd = 1.0)
   
   #--- INDIVIDUAL-LEVEL PARAMETERS ---
   for(i in 1:nfish){
-    psi_geo[i]  <- ilogit(alpha_geo  + beta_geo  * flow_occ2[i])
-    psi_ss[i]   <- ilogit(alpha_ss   + beta_ss   * flow_occ3[i])
+    
+    # Routing with water year random effects
+    psi_geo[i]  <- ilogit(alpha_geo  + beta_geo  * flow_occ2[i] +
+                            eps_geo[year_id[i]])
+    psi_ss[i]   <- ilogit(alpha_ss   + beta_ss   * flow_occ3[i] +
+                            eps_ss[year_id[i]])
+    
+    # Failure
     phi_fail[i] <- ilogit(alpha_fail + beta_fail * flow_30day[i])
-    p_ss_i[i]   <- ilogit(alpha_p_ss + beta_p_ss * flow_occ3[i])
+    
+    # Flow-dependent detection
+    p_ss_i[i]   <- ilogit(alpha_p_ss   + beta_p_ss   * flow_occ3[i])
+    p_sac3_i[i] <- ilogit(alpha_p_sac3 + beta_p_sac3 * flow_occ2[i])
+    
   }
   
   #--- FIXED OBSERVATION ARRAY ---
@@ -320,8 +360,8 @@ nimCode_09 <- nimbleCode({
   p_arr[5, 1:6, 2] <- c(0, 0, 0, 0, 1, 0)
   p_arr[6, 1:6, 2] <- c(0, 0, 0, 0, 0, 1)
   
-  # Occasion 3 placeholder — SS row overridden per fish
-  p_arr[1, 1:6, 3] <- c(p_sac3, 0, 0, 0, 0, (1-p_sac3))
+  # Occasion 3 placeholder — overridden per fish for SS and sac3
+  p_arr[1, 1:6, 3] <- c(0.9, 0, 0, 0, 0, 0.1)
   p_arr[2, 1:6, 3] <- c(0, 0, 0, 0, 0, 1)
   p_arr[3, 1:6, 3] <- c(0, 0, 0.5, 0, 0, 0.5)
   p_arr[4, 1:6, 3] <- c(0, 0, 0, 1, 0, 0)
@@ -359,6 +399,8 @@ nimCode_09 <- nimbleCode({
   #--- LIKELIHOOD ---
   for(i in 1:nfish){
     
+    # Fish-specific observation array
+    # Occasions 1, 2, 4-7 same as fixed p_arr
     p_arr_i[i, 1, 1:6, 1] <- p_arr[1, 1:6, 1]
     p_arr_i[i, 2, 1:6, 1] <- p_arr[2, 1:6, 1]
     p_arr_i[i, 3, 1:6, 1] <- p_arr[3, 1:6, 1]
@@ -373,8 +415,8 @@ nimCode_09 <- nimbleCode({
     p_arr_i[i, 5, 1:6, 2] <- p_arr[5, 1:6, 2]
     p_arr_i[i, 6, 1:6, 2] <- p_arr[6, 1:6, 2]
     
-    # Occasion 3 — fish-specific p_ss
-    p_arr_i[i, 1, 1:6, 3] <- p_arr[1, 1:6, 3]
+    # Occasion 3 — fish-specific p_sac3 and p_ss
+    p_arr_i[i, 1, 1:6, 3] <- c(p_sac3_i[i], 0, 0, 0, 0, (1-p_sac3_i[i]))
     p_arr_i[i, 2, 1:6, 3] <- p_arr[2, 1:6, 3]
     p_arr_i[i, 3, 1:6, 3] <- c(0, 0, p_ss_i[i], 0, 0, (1-p_ss_i[i]))
     p_arr_i[i, 4, 1:6, 3] <- p_arr[4, 1:6, 3]
@@ -409,6 +451,7 @@ nimCode_09 <- nimbleCode({
     p_arr_i[i, 5, 1:6, 7] <- p_arr[5, 1:6, 7]
     p_arr_i[i, 6, 1:6, 7] <- p_arr[6, 1:6, 7]
     
+    # Transition matrices — identical to model 09
     tr_arr_i[i, 1, 1:6, 1] <- c(S_sac*(1-psi_geo[i])*(1-phi_fail[i]),
                                 S_sac*psi_geo[i]*(1-phi_fail[i]),
                                 0, (1-S_sac), S_sac*phi_fail[i], 0)
@@ -477,333 +520,120 @@ nimCode_09 <- nimbleCode({
 # SECTION 6: BUILD MODEL AND CONFIGURE MCMC
 #==============================================================================
 
-inits_09 <- list(
-  S_sac      = 0.99, S_geo = 0.95, S_ss = 0.97,
-  p_sac2     = 0.977, p_sac3 = 0.899,
-  p_sac4     = 0.910, p_sac5 = 0.893, p_sac6 = 0.986,
-  p_geo      = 0.771,
-  lambda     = 0.986,
-  alpha_geo  = -1.95, beta_geo  = 0.0,
-  alpha_ss   = -0.51, beta_ss   = 0.0,
-  alpha_fail = -2.3,  beta_fail = 0.0,
-  alpha_p_ss = -0.39, beta_p_ss = 0.0
+inits_10 <- list(
+  S_sac        = 0.99, S_geo = 0.95, S_ss = 0.97,
+  p_sac2       = 0.977, p_sac4 = 0.910,
+  p_sac5       = 0.893, p_sac6 = 0.986,
+  p_geo        = 0.771,
+  lambda       = 0.986,
+  alpha_geo    = -1.95, beta_geo    = 0.0,
+  alpha_ss     = -0.51, beta_ss     = 0.0,
+  sigma_geo    = 0.5,   sigma_ss    = 0.5,
+  alpha_fail   = -2.3,  beta_fail   = 0.0,
+  alpha_p_ss   = -0.39, beta_p_ss   = 0.0,
+  alpha_p_sac3 = 2.17,  beta_p_sac3 = 0.0  # ilogit(2.17) ~ 0.90 = baseline p_sac3
 )
 
-nimMod_09 <- nimbleModel(
-  code      = nimCode_09,
-  inits     = inits_09,
+# Initialize random effects at 0
+inits_10$eps_geo <- rep(0, nyears)
+inits_10$eps_ss  <- rep(0, nyears)
+
+nimMod_10 <- nimbleModel(
+  code      = nimCode_10,
+  inits     = inits_10,
   data      = list(ch_mat = ch_mat_nimble),
   constants = list(
     nfish      = nrow(ch_mat_nimble),
-    flow_occ2  = flow_occ2_09,
-    flow_occ3  = flow_occ3_09,
-    flow_30day = flow_30day_09
+    nyears     = nyears,
+    year_id    = year_index,
+    flow_occ2  = flow_occ2_10,
+    flow_occ3  = flow_occ3_10,
+    flow_30day = flow_30day_10
   )
 )
 
-nimMod_09$calculate()
+nimMod_10$calculate()
 
-inits_fn_09 <- function(){
+inits_fn_10 <- function(){
   list(
-    S_sac      = runif(1, 0.95, 1.0),
-    S_geo      = runif(1, 0.80, 1.0),
-    S_ss       = runif(1, 0.85, 1.0),
-    p_sac2     = runif(1, 0.90, 1.0),
-    p_sac3     = runif(1, 0.75, 0.95),
-    p_sac4     = runif(1, 0.80, 0.95),
-    p_sac5     = runif(1, 0.80, 0.95),
-    p_sac6     = runif(1, 0.95, 1.0),
-    p_geo      = runif(1, 0.50, 0.90),
-    lambda     = runif(1, 0.95, 1.0),
-    alpha_geo  = rnorm(1, -1.95, 0.3), beta_geo  = rnorm(1, 0, 0.2),
-    alpha_ss   = rnorm(1, -0.51, 0.3), beta_ss   = rnorm(1, 0, 0.2),
-    alpha_fail = rnorm(1, -2.3,  0.3), beta_fail = rnorm(1, 0, 0.2),
-    alpha_p_ss = rnorm(1, -0.39, 0.3), beta_p_ss = rnorm(1, 0, 0.2)
+    S_sac        = runif(1, 0.95, 1.0),
+    S_geo        = runif(1, 0.80, 1.0),
+    S_ss         = runif(1, 0.85, 1.0),
+    p_sac2       = runif(1, 0.90, 1.0),
+    p_sac4       = runif(1, 0.80, 0.95),
+    p_sac5       = runif(1, 0.80, 0.95),
+    p_sac6       = runif(1, 0.95, 1.0),
+    p_geo        = runif(1, 0.50, 0.90),
+    lambda       = runif(1, 0.95, 1.0),
+    alpha_geo    = rnorm(1, -1.95, 0.3), beta_geo    = rnorm(1, 0, 0.2),
+    alpha_ss     = rnorm(1, -0.51, 0.3), beta_ss     = rnorm(1, 0, 0.2),
+    sigma_geo    = runif(1, 0.1, 1.0),   sigma_ss    = runif(1, 0.1, 1.0),
+    eps_geo      = rnorm(nyears, 0, 0.3),
+    eps_ss       = rnorm(nyears, 0, 0.3),
+    alpha_fail   = rnorm(1, -2.3,  0.3), beta_fail   = rnorm(1, 0, 0.2),
+    alpha_p_ss   = rnorm(1, -0.39, 0.3), beta_p_ss   = rnorm(1, 0, 0.2),
+    alpha_p_sac3 = rnorm(1, 2.17,  0.3), beta_p_sac3 = rnorm(1, 0, 0.2)
   )
 }
 
-params_09 <- c(
+params_10 <- c(
   "S_sac", "S_geo", "S_ss",
-  "p_sac2", "p_sac3", "p_sac4", "p_sac5", "p_sac6",
-  "p_geo", "lambda",
+  "p_sac2", "p_sac4", "p_sac5", "p_sac6", "p_geo",
+  "lambda",
   "alpha_geo", "beta_geo",
   "alpha_ss",  "beta_ss",
+  "sigma_geo", "sigma_ss",
+  "eps_geo", "eps_ss",
   "alpha_fail", "beta_fail",
-  "alpha_p_ss", "beta_p_ss"
+  "alpha_p_ss",   "beta_p_ss",
+  "alpha_p_sac3", "beta_p_sac3"
 )
 
-confMCMC_09 <- configureMCMC(nimMod_09, onlySlice = TRUE)
-confMCMC_09$addMonitors(params_09)
-MCMC_09   <- buildMCMC(confMCMC_09)
-CModel_09 <- compileNimble(nimMod_09)
-CMCMC_09  <- compileNimble(MCMC_09, project = CModel_09)
+confMCMC_10 <- configureMCMC(nimMod_10, onlySlice = TRUE)
+confMCMC_10$addMonitors(params_10)
+MCMC_10   <- buildMCMC(confMCMC_10)
+CModel_10 <- compileNimble(nimMod_10)
+CMCMC_10  <- compileNimble(MCMC_10, project = CModel_10)
 
 #==============================================================================
 # SECTION 7: RUN MCMC AND SAVE
 #==============================================================================
 
 # Short test run first
-# mcmc_test_09 <- runMCMC(CMCMC_09, niter = 1000, nchains = 1,
-#                          nburnin = 100, thin = 1,
-#                          inits = list(inits_fn_09()),
-#                          samplesAsCodaMCMC = TRUE)
-# MCMCsummary(mcmc_test_09, round = 3)
+mcmc_test_10 <- runMCMC(CMCMC_10, niter = 1000, nchains = 1,
+                          nburnin = 100, thin = 1,
+                         inits = list(inits_fn_10()),
+                          samplesAsCodaMCMC = TRUE)
+ MCMCsummary(mcmc_test_10, round = 3)
 
-mcmc_out_09 <- runMCMC(
-  CMCMC_09,
+mcmc_out_10 <- runMCMC(
+  CMCMC_10,
   niter   = 50000,
   nchains = 3,
   nburnin = 10000,
   thin    = 10,
-  inits   = list(inits_fn_09(), inits_fn_09(), inits_fn_09()),
+  inits   = list(inits_fn_10(), inits_fn_10(), inits_fn_10()),
   samplesAsCodaMCMC = TRUE
 )
 
-MCMCsummary(mcmc_out_09, round = 3)
+MCMCsummary(mcmc_out_10, round = 3)
 
-save(mcmc_out_09, flow_occ2_09, flow_occ3_09, flow_30day_09,
-     fish_flow_09,
-     flow_occ2_mean_09, flow_occ2_sd_09,
-     flow_occ3_mean_09, flow_occ3_sd_09,
-     flow_30day_mean_09, flow_30day_sd_09,
-     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_09_run1.RData")
+save(mcmc_out_10, flow_occ2_10, flow_occ3_10, flow_30day_10,
+     fish_flow_10, year_index, water_years, nyears,
+     flow_occ2_mean_10, flow_occ2_sd_10,
+     flow_occ3_mean_10, flow_occ3_sd_10,
+     flow_30day_mean_10, flow_30day_sd_10,
+     file = "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_mcmc_flow_10_run1.RData")
 
-MCMCtrace(mcmc_out_09,
+MCMCtrace(mcmc_out_10,
           params   = c("alpha_geo", "beta_geo",
                        "alpha_ss",  "beta_ss",
+                       "sigma_geo", "sigma_ss",
                        "alpha_fail", "beta_fail",
                        "alpha_p_ss", "beta_p_ss",
-                       "lambda"),
+                       "alpha_p_sac3", "beta_p_sac3"),
           pdf      = TRUE,
-          filename = "gs_mcmc_traces_flow_09_run1",
+          filename = "gs_mcmc_traces_flow_10_run1",
           ind      = TRUE,
           Rhat     = TRUE,
           n.eff    = TRUE)
-
-cat("Model 09 saved\n")
-
-#==============================================================================
-# SECTION 8: POSTERIOR PREDICTIVE CHECKS
-# Simulate detection histories from posterior and compare to observed
-# Following Gelman et al. 2013 — Bayesian p-value between 0.05 and 0.95
-# indicates adequate fit
-#==============================================================================
-
-cat("\nRunning posterior predictive checks...\n")
-
-# Extract posterior samples
-post_samples <- do.call(rbind, lapply(mcmc_out_09, as.matrix))
-n_samples    <- nrow(post_samples)
-nfish        <- nrow(ch_mat_nimble)
-nocc         <- 7
-
-cat("Posterior samples:", n_samples, "\n")
-cat("Using every 10th sample for speed...\n")
-sample_idx <- seq(1, n_samples, by = 10)
-n_ppc      <- length(sample_idx)
-
-# Function to simulate one detection history given parameters
-simulate_ch <- function(psi_geo, psi_ss, phi_fail_p, S_sac, S_geo, S_ss,
-                        p_sac2, p_sac3, p_sac4, p_sac5, p_sac6,
-                        p_geo, p_ss, lambda){
-  
-  # Initial state — all fish start in Sacramento (state 1)
-  state <- 1
-  obs   <- numeric(nocc)
-  obs[1] <- 1  # certain detection at Benicia
-  
-  for(j in 1:6){
-    
-    # Transition
-    if(state == 1){
-      # Sacramento fish
-      if(j == 1){
-        # Georgiana routing decision
-        u <- runif(1)
-        if(u < (1-S_sac)) { state <- 4; next }
-        if(u < (1-S_sac) + S_sac*phi_fail_p) { state <- 5; next }
-        if(runif(1) < psi_geo) state <- 2
-      } else if(j == 2){
-        # SS routing decision
-        if(runif(1) < (1-S_sac)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-        if(runif(1) < psi_ss) state <- 3
-      } else {
-        if(runif(1) < (1-S_sac)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-      }
-    } else if(state == 2){
-      # Georgiana fish rejoin Sac at occ3->4
-      if(j == 2){
-        if(runif(1) < (1-S_geo)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-        state <- 1
-      }
-    } else if(state == 3){
-      # SS fish rejoin Sac at occ4->5
-      if(j <= 3){
-        if(runif(1) < (1-S_ss)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-      } else {
-        state <- 1
-      }
-    }
-    
-    # Observation
-    if(state == 4 || state == 5){
-      obs[j+1] <- state
-    } else if(state == 1){
-      p_det <- switch(j+1,
-                      1, p_sac2, p_sac3, p_sac4, p_sac5, p_sac6, 1)
-      obs[j+1] <- if(runif(1) < p_det) 1L else 6L
-    } else if(state == 2){
-      obs[j+1] <- if(runif(1) < p_geo) 2L else 6L
-    } else if(state == 3){
-      obs[j+1] <- if(runif(1) < p_ss) 3L else 6L
-    }
-  }
-  
-  # Spawning ground
-  if(state == 1 && runif(1) < lambda) obs[7] <- 1L else if(state != 4 && state != 5) obs[7] <- 6L
-  
-  return(obs)
-}
-
-# Compute observed test statistics
-# Use proportion detected at each occasion as test statistics
-obs_stats <- colMeans(ch_mat_nimble != 6)
-cat("\nObserved detection rates by occasion:\n")
-print(round(obs_stats, 3))
-
-# Simulate replicated datasets
-rep_stats <- matrix(NA, nrow = n_ppc, ncol = nocc)
-
-cat("Simulating", n_ppc, "replicated datasets...\n")
-
-for(k in 1:n_ppc){
-  s <- sample_idx[k]
-  
-  # Extract parameters for this posterior draw
-  alpha_geo_s  <- post_samples[s, "alpha_geo"]
-  beta_geo_s   <- post_samples[s, "beta_geo"]
-  alpha_ss_s   <- post_samples[s, "alpha_ss"]
-  beta_ss_s    <- post_samples[s, "beta_ss"]
-  alpha_fail_s <- post_samples[s, "alpha_fail"]
-  beta_fail_s  <- post_samples[s, "beta_fail"]
-  alpha_p_ss_s <- post_samples[s, "alpha_p_ss"]
-  beta_p_ss_s  <- post_samples[s, "beta_p_ss"]
-  S_sac_s      <- post_samples[s, "S_sac"]
-  S_geo_s      <- post_samples[s, "S_geo"]
-  S_ss_s       <- post_samples[s, "S_ss"]
-  p_sac2_s     <- post_samples[s, "p_sac2"]
-  p_sac3_s     <- post_samples[s, "p_sac3"]
-  p_sac4_s     <- post_samples[s, "p_sac4"]
-  p_sac5_s     <- post_samples[s, "p_sac5"]
-  p_sac6_s     <- post_samples[s, "p_sac6"]
-  p_geo_s      <- post_samples[s, "p_geo"]
-  lambda_s     <- post_samples[s, "lambda"]
-  
-  # Simulate nfish detection histories
-  sim_ch <- matrix(NA, nrow = nfish, ncol = nocc)
-  for(i in 1:nfish){
-    psi_geo_i  <- plogis(alpha_geo_s  + beta_geo_s  * flow_occ2_09[i])
-    psi_ss_i   <- plogis(alpha_ss_s   + beta_ss_s   * flow_occ3_09[i])
-    phi_fail_i <- plogis(alpha_fail_s + beta_fail_s * flow_30day_09[i])
-    p_ss_i     <- plogis(alpha_p_ss_s + beta_p_ss_s * flow_occ3_09[i])
-    
-    sim_ch[i, ] <- simulate_ch(
-      psi_geo    = psi_geo_i,
-      psi_ss     = psi_ss_i,
-      phi_fail_p = phi_fail_i,
-      S_sac      = S_sac_s,
-      S_geo      = S_geo_s,
-      S_ss       = S_ss_s,
-      p_sac2     = p_sac2_s,
-      p_sac3     = p_sac3_s,
-      p_sac4     = p_sac4_s,
-      p_sac5     = p_sac5_s,
-      p_sac6     = p_sac6_s,
-      p_geo      = p_geo_s,
-      p_ss       = p_ss_i,
-      lambda     = lambda_s
-    )
-  }
-  
-  rep_stats[k, ] <- colMeans(sim_ch != 6)
-  
-  if(k %% 100 == 0) cat("Completed", k, "of", n_ppc, "simulations\n")
-}
-
-# Compute Bayesian p-values
-# p-value = proportion of simulated statistics >= observed statistic
-bayesian_pvals <- colMeans(sweep(rep_stats, 2, obs_stats, ">="))
-
-cat("\n=== POSTERIOR PREDICTIVE CHECK RESULTS ===\n")
-cat("Bayesian p-values by occasion:\n")
-ppc_results <- data.frame(
-  occasion    = paste0("occ", 1:nocc),
-  observed    = round(obs_stats, 3),
-  sim_mean    = round(colMeans(rep_stats), 3),
-  sim_lower   = round(apply(rep_stats, 2, quantile, 0.025), 3),
-  sim_upper   = round(apply(rep_stats, 2, quantile, 0.975), 3),
-  bayesian_p  = round(bayesian_pvals, 3),
-  adequate_fit = bayesian_pvals > 0.05 & bayesian_pvals < 0.95
-)
-print(ppc_results)
-
-cat("\nOverall: adequate fit if all Bayesian p-values between 0.05 and 0.95\n")
-cat("p-values outside this range indicate potential lack of fit\n")
-
-# Plot posterior predictive check
-library(ggplot2)
-
-ppc_plot_data <- as.data.frame(rep_stats)
-colnames(ppc_plot_data) <- paste0("occ", 1:nocc)
-ppc_long <- tidyr::pivot_longer(ppc_plot_data,
-                                cols = everything(),
-                                names_to = "occasion",
-                                values_to = "sim_rate")
-
-obs_df <- data.frame(
-  occasion = paste0("occ", 1:nocc),
-  obs_rate = obs_stats
-)
-
-p_ppc <- ggplot(ppc_long, aes(x = sim_rate)) +
-  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7, color = "white") +
-  geom_vline(data = obs_df,
-             aes(xintercept = obs_rate),
-             color = "red", linewidth = 1.2, linetype = "solid") +
-  facet_wrap(~ occasion, ncol = 4, scales = "free") +
-  labs(
-    x        = "Simulated detection rate",
-    y        = "Count",
-    title    = "Posterior predictive check — model 09",
-    subtitle = "Red line = observed detection rate | Histogram = simulated from posterior"
-  ) +
-  theme_bw(base_size = 11, base_family = "Times New Roman") +
-  theme(
-    strip.background = element_rect(fill = "gray90"),
-    strip.text       = element_text(face = "bold"),
-    panel.grid.minor = element_blank(),
-    plot.title       = element_text(face = "bold", size = 11),
-    plot.subtitle    = element_text(size = 9, color = "gray40")
-  )
-
-print(p_ppc)
-
-ggsave(
-  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09.pdf",
-  plot = p_ppc, width = 10, height = 6, device = "pdf")
-
-ggsave(
-  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09.png",
-  plot = p_ppc, width = 10, height = 6, dpi = 300)
-
-# Save PPC results
-write.csv(ppc_results,
-          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/ppc_results_model09.csv",
-          row.names = FALSE)
-
-cat("Posterior predictive check complete and saved\n")
-
