@@ -5,7 +5,7 @@
 # Last updated: June 2026
 #
 # PURPOSE:
-# Final model adding water year random effects on routing probabilities
+# Adding water year random effects on routing probabilities
 # and testing flow-dependent detection at SR_MOUTH (p_sac3) to model 09.
 # beta_p_geo dropped — not supported in model 09 (CI: -2.796 to 0.626).
 #

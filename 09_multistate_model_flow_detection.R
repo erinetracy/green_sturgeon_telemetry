@@ -584,179 +584,111 @@ cat("Model 09 saved\n")
 
 #==============================================================================
 # SECTION 8: POSTERIOR PREDICTIVE CHECKS
-# Simulate detection histories from posterior and compare to observed
-# Following Gelman et al. 2013 — Bayesian p-value between 0.05 and 0.95
-# indicates adequate fit
-#==============================================================================
+# USING NIMBLE'S NATIVE SIMULATE()
+# Guarantees simulation exactly matches the fitted model structure
+# =============================================================================
 
-cat("\nRunning posterior predictive checks...\n")
+library(nimble)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
 
-# Extract posterior samples
+# --- Make sure compiled model objects from model 09 are still in environment ---
+# nimMod_09, CModel_09 should exist from the model 09 run
+# If not, you'll need to rebuild and recompile before running this
+
+cat("Checking required objects exist...\n")
+cat("nimMod_09 exists:", exists("nimMod_09"), "\n")
+cat("CModel_09 exists:", exists("CModel_09"), "\n")
+
+# --- Extract posterior samples ---
 post_samples <- do.call(rbind, lapply(mcmc_out_09, as.matrix))
 n_samples    <- nrow(post_samples)
 nfish        <- nrow(ch_mat_nimble)
 nocc         <- 7
 
 cat("Posterior samples:", n_samples, "\n")
-cat("Using every 10th sample for speed...\n")
-sample_idx <- seq(1, n_samples, by = 10)
+
+# Use a subset for computational speed
+sample_idx <- seq(1, n_samples, by = 20)
 n_ppc      <- length(sample_idx)
+cat("Using", n_ppc, "posterior draws for PPC\n")
 
-# Function to simulate one detection history given parameters
-simulate_ch <- function(psi_geo, psi_ss, phi_fail_p, S_sac, S_geo, S_ss,
-                        p_sac2, p_sac3, p_sac4, p_sac5, p_sac6,
-                        p_geo, p_ss, lambda){
-  
-  # Initial state — all fish start in Sacramento (state 1)
-  state <- 1
-  obs   <- numeric(nocc)
-  obs[1] <- 1  # certain detection at Benicia
-  
-  for(j in 1:6){
-    
-    # Transition
-    if(state == 1){
-      # Sacramento fish
-      if(j == 1){
-        # Georgiana routing decision
-        u <- runif(1)
-        if(u < (1-S_sac)) { state <- 4; next }
-        if(u < (1-S_sac) + S_sac*phi_fail_p) { state <- 5; next }
-        if(runif(1) < psi_geo) state <- 2
-      } else if(j == 2){
-        # SS routing decision
-        if(runif(1) < (1-S_sac)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-        if(runif(1) < psi_ss) state <- 3
-      } else {
-        if(runif(1) < (1-S_sac)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-      }
-    } else if(state == 2){
-      # Georgiana fish rejoin Sac at occ3->4
-      if(j == 2){
-        if(runif(1) < (1-S_geo)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-        state <- 1
-      }
-    } else if(state == 3){
-      # SS fish rejoin Sac at occ4->5
-      if(j <= 3){
-        if(runif(1) < (1-S_ss)) { state <- 4; next }
-        if(runif(1) < phi_fail_p) { state <- 5; next }
-      } else {
-        state <- 1
-      }
-    }
-    
-    # Observation
-    if(state == 4 || state == 5){
-      obs[j+1] <- state
-    } else if(state == 1){
-      p_det <- switch(j+1,
-                      1, p_sac2, p_sac3, p_sac4, p_sac5, p_sac6, 1)
-      obs[j+1] <- if(runif(1) < p_det) 1L else 6L
-    } else if(state == 2){
-      obs[j+1] <- if(runif(1) < p_geo) 2L else 6L
-    } else if(state == 3){
-      obs[j+1] <- if(runif(1) < p_ss) 3L else 6L
-    }
-  }
-  
-  # Spawning ground
-  if(state == 1 && runif(1) < lambda) obs[7] <- 1L else if(state != 4 && state != 5) obs[7] <- 6L
-  
-  return(obs)
-}
-
-# Compute observed test statistics
-# Use proportion detected at each occasion as test statistics
-obs_stats <- colMeans(ch_mat_nimble != 6)
-cat("\nObserved detection rates by occasion:\n")
-print(round(obs_stats, 3))
-
-# Simulate replicated datasets
+# --- Storage for simulated detection rates ---
 rep_stats <- matrix(NA, nrow = n_ppc, ncol = nocc)
 
-cat("Simulating", n_ppc, "replicated datasets...\n")
+# --- Identify the data node names for ch_mat ---
+data_nodes <- CModel_09$getNodeNames(dataOnly = TRUE)
+cat("Data nodes found:", length(data_nodes), "\n")
+cat("Example node names:", head(data_nodes, 3), "\n")
+
+# --- Run simulation loop using the compiled model ---
+cat("\nSimulating", n_ppc, "replicated datasets using NIMBLE simulate()...\n")
 
 for(k in 1:n_ppc){
   s <- sample_idx[k]
   
-  # Extract parameters for this posterior draw
-  alpha_geo_s  <- post_samples[s, "alpha_geo"]
-  beta_geo_s   <- post_samples[s, "beta_geo"]
-  alpha_ss_s   <- post_samples[s, "alpha_ss"]
-  beta_ss_s    <- post_samples[s, "beta_ss"]
-  alpha_fail_s <- post_samples[s, "alpha_fail"]
-  beta_fail_s  <- post_samples[s, "beta_fail"]
-  alpha_p_ss_s <- post_samples[s, "alpha_p_ss"]
-  beta_p_ss_s  <- post_samples[s, "beta_p_ss"]
-  S_sac_s      <- post_samples[s, "S_sac"]
-  S_geo_s      <- post_samples[s, "S_geo"]
-  S_ss_s       <- post_samples[s, "S_ss"]
-  p_sac2_s     <- post_samples[s, "p_sac2"]
-  p_sac3_s     <- post_samples[s, "p_sac3"]
-  p_sac4_s     <- post_samples[s, "p_sac4"]
-  p_sac5_s     <- post_samples[s, "p_sac5"]
-  p_sac6_s     <- post_samples[s, "p_sac6"]
-  p_geo_s      <- post_samples[s, "p_geo"]
-  lambda_s     <- post_samples[s, "lambda"]
+  # set parameter values in the compiled model
+  CModel_09$alpha_geo  <- post_samples[s, "alpha_geo"]
+  CModel_09$beta_geo   <- post_samples[s, "beta_geo"]
+  CModel_09$alpha_ss   <- post_samples[s, "alpha_ss"]
+  CModel_09$beta_ss    <- post_samples[s, "beta_ss"]
+  CModel_09$alpha_fail <- post_samples[s, "alpha_fail"]
+  CModel_09$beta_fail  <- post_samples[s, "beta_fail"]
+  CModel_09$alpha_p_ss <- post_samples[s, "alpha_p_ss"]
+  CModel_09$beta_p_ss  <- post_samples[s, "beta_p_ss"]
+  CModel_09$S_sac      <- post_samples[s, "S_sac"]
+  CModel_09$S_geo      <- post_samples[s, "S_geo"]
+  CModel_09$S_ss       <- post_samples[s, "S_ss"]
+  CModel_09$p_sac2     <- post_samples[s, "p_sac2"]
+  CModel_09$p_sac3     <- post_samples[s, "p_sac3"]
+  CModel_09$p_sac4     <- post_samples[s, "p_sac4"]
+  CModel_09$p_sac5     <- post_samples[s, "p_sac5"]
+  CModel_09$p_sac6     <- post_samples[s, "p_sac6"]
+  CModel_09$p_geo      <- post_samples[s, "p_geo"]
+  CModel_09$lambda     <- post_samples[s, "lambda"]
   
-  # Simulate nfish detection histories
-  sim_ch <- matrix(NA, nrow = nfish, ncol = nocc)
-  for(i in 1:nfish){
-    psi_geo_i  <- plogis(alpha_geo_s  + beta_geo_s  * flow_occ2_09[i])
-    psi_ss_i   <- plogis(alpha_ss_s   + beta_ss_s   * flow_occ3_09[i])
-    phi_fail_i <- plogis(alpha_fail_s + beta_fail_s * flow_30day_09[i])
-    p_ss_i     <- plogis(alpha_p_ss_s + beta_p_ss_s * flow_occ3_09[i])
-    
-    sim_ch[i, ] <- simulate_ch(
-      psi_geo    = psi_geo_i,
-      psi_ss     = psi_ss_i,
-      phi_fail_p = phi_fail_i,
-      S_sac      = S_sac_s,
-      S_geo      = S_geo_s,
-      S_ss       = S_ss_s,
-      p_sac2     = p_sac2_s,
-      p_sac3     = p_sac3_s,
-      p_sac4     = p_sac4_s,
-      p_sac5     = p_sac5_s,
-      p_sac6     = p_sac6_s,
-      p_geo      = p_geo_s,
-      p_ss       = p_ss_i,
-      lambda     = lambda_s
-    )
-  }
+  # recalculate deterministic nodes (psi_geo, psi_ss, phi_fail, p_ss_i,
+  # p_arr_i, tr_arr_i) given the new parameter values
+  CModel_09$calculate()
   
+  # simulate the data node (ch_mat) from the model's own data-generating
+  # process — this uses the actual fitted transition/observation logic
+  CModel_09$simulate(data_nodes, includeData = TRUE)
+  
+  # extract simulated detection histories
+  sim_ch <- CModel_09$ch_mat
+  
+  # compute detection rate by occasion (not state 6 = not detected)
   rep_stats[k, ] <- colMeans(sim_ch != 6)
   
-  if(k %% 100 == 0) cat("Completed", k, "of", n_ppc, "simulations\n")
+  if(k %% 50 == 0) cat("Completed", k, "of", n_ppc, "simulations\n")
 }
 
-# Compute Bayesian p-values
-# p-value = proportion of simulated statistics >= observed statistic
+cat("Simulation complete\n")
+
+# --- Compute observed test statistics ---
+obs_stats <- colMeans(ch_mat_nimble != 6)
+cat("\nObserved detection rates by occasion:\n")
+print(round(obs_stats, 3))
+
+# --- Bayesian p-values ---
 bayesian_pvals <- colMeans(sweep(rep_stats, 2, obs_stats, ">="))
 
-cat("\n=== POSTERIOR PREDICTIVE CHECK RESULTS ===\n")
-cat("Bayesian p-values by occasion:\n")
 ppc_results <- data.frame(
-  occasion    = paste0("occ", 1:nocc),
-  observed    = round(obs_stats, 3),
-  sim_mean    = round(colMeans(rep_stats), 3),
-  sim_lower   = round(apply(rep_stats, 2, quantile, 0.025), 3),
-  sim_upper   = round(apply(rep_stats, 2, quantile, 0.975), 3),
-  bayesian_p  = round(bayesian_pvals, 3),
+  occasion     = paste0("occ", 1:nocc),
+  observed     = round(obs_stats, 3),
+  sim_mean     = round(colMeans(rep_stats), 3),
+  sim_lower    = round(apply(rep_stats, 2, quantile, 0.025), 3),
+  sim_upper    = round(apply(rep_stats, 2, quantile, 0.975), 3),
+  bayesian_p   = round(bayesian_pvals, 3),
   adequate_fit = bayesian_pvals > 0.05 & bayesian_pvals < 0.95
 )
+
+cat("\n=== POSTERIOR PREDICTIVE CHECK RESULTS (NIMBLE native simulate) ===\n")
 print(ppc_results)
 
-cat("\nOverall: adequate fit if all Bayesian p-values between 0.05 and 0.95\n")
-cat("p-values outside this range indicate potential lack of fit\n")
-
-# Plot posterior predictive check
-library(ggplot2)
-
+# --- Plot ---
 ppc_plot_data <- as.data.frame(rep_stats)
 colnames(ppc_plot_data) <- paste0("occ", 1:nocc)
 ppc_long <- tidyr::pivot_longer(ppc_plot_data,
@@ -773,13 +705,13 @@ p_ppc <- ggplot(ppc_long, aes(x = sim_rate)) +
   geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7, color = "white") +
   geom_vline(data = obs_df,
              aes(xintercept = obs_rate),
-             color = "red", linewidth = 1.2, linetype = "solid") +
+             color = "red", linewidth = 1.2) +
   facet_wrap(~ occasion, ncol = 4, scales = "free") +
   labs(
     x        = "Simulated detection rate",
     y        = "Count",
     title    = "Posterior predictive check — model 09",
-    subtitle = "Red line = observed detection rate | Histogram = simulated from posterior"
+    subtitle = "Red line = observed detection rate | Simulated using NIMBLE's native data-generating process"
   ) +
   theme_bw(base_size = 11, base_family = "Times New Roman") +
   theme(
@@ -793,17 +725,15 @@ p_ppc <- ggplot(ppc_long, aes(x = sim_rate)) +
 print(p_ppc)
 
 ggsave(
-  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09.pdf",
+  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09_native.pdf",
   plot = p_ppc, width = 10, height = 6, device = "pdf")
 
 ggsave(
-  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09.png",
+  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/figures/gs_ppc_model09_native.png",
   plot = p_ppc, width = 10, height = 6, dpi = 300)
 
-# Save PPC results
 write.csv(ppc_results,
-          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/ppc_results_model09.csv",
+          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/ppc_results_model09_native.csv",
           row.names = FALSE)
 
-cat("Posterior predictive check complete and saved\n")
-
+cat("\nPosterior predictive check complete and saved\n")
