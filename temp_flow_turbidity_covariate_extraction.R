@@ -887,3 +887,181 @@ cat("Turbidity covariates saved — not pursued further due to:\n")
 cat("1. Lower explanatory power than temperature (pseudo R2 0.05 vs 0.44)\n")
 cat("2. Borderline collinearity with 30-day flow (r = 0.727)\n")
 cat("3. Biologically less direct cue than temperature or flow\n")
+
+
+
+
+
+
+
+
+rv_flow <- read.csv(
+  "C:/Users/eetracy/Desktop/Post_doc_GS/daily_tidalfilter_riovista.csv"
+)
+
+rv_flow_complete <- rv_flow %>%
+  mutate(date = as.Date(time)) %>%
+  dplyr::select(date, flow_cfs = value) %>%
+  filter(!is.na(flow_cfs),
+         date >= as.Date("2006-09-01"),
+         date <= as.Date("2017-09-30")) %>%
+  arrange(date) %>%
+  tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
+  mutate(flow_cfs = zoo::na.approx(flow_cfs, na.rm = FALSE))
+
+geo_flow <- read.csv(
+  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/flow/RioVista_Confluence_Flows.csv"
+)
+
+ges_flow_complete <- geo_flow %>%
+  mutate(date = as.Date(dateTime, format = "%m/%d/%Y %H:%M")) %>%
+  group_by(date) %>%
+  dplyr::summarise(flow_GES = mean(GES, na.rm = TRUE), .groups = "drop") %>%
+  filter(!is.na(date),
+         date >= as.Date("2006-09-01"),
+         date <= as.Date("2017-09-30")) %>%
+  arrange(date) %>%
+  tidyr::complete(date = seq(min(date), max(date), by = "day")) %>%
+  mutate(flow_GES = zoo::na.approx(flow_GES, na.rm = FALSE))
+
+temp_flow_raw <- read.csv(
+  "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/flow/daily_tidalfilter_riovista_temp_flow.csv"
+)
+
+temp_flow_clean <- temp_flow_raw %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  dplyr::select(date, temp_c = daily_temp_c) %>%
+  filter(!is.na(date),
+         date >= as.Date("2006-09-01"),
+         date <= as.Date("2017-09-30")) %>%
+  arrange(date) %>%
+  tidyr::complete(date = seq(as.Date("2006-09-01"),
+                             as.Date("2017-09-30"),
+                             by = "day")) %>%
+  mutate(temp_c = zoo::na.approx(temp_c, na.rm = FALSE))
+
+benicia_dates <- model1_events %>%
+  filter(receiver_group %in% c("benicia", "carquinez")) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(benicia_date = as.Date(min(first_detection)),
+                   .groups = "drop")
+
+occ2_dates <- model1_events %>%
+  filter(occasion == 2) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(arr_date_occ2 = as.Date(min(first_detection)),
+                   .groups = "drop")
+
+occ3_dates <- model1_events %>%
+  filter(occasion == 3) %>%
+  group_by(animal_id, water_year) %>%
+  dplyr::summarise(arr_date_occ3 = as.Date(min(first_detection)),
+                   .groups = "drop")
+
+fish_cov_12b <- detection_history %>%
+  dplyr::select(animal_id, water_year) %>%
+  left_join(occ2_dates,    by = c("animal_id", "water_year")) %>%
+  left_join(occ3_dates,    by = c("animal_id", "water_year")) %>%
+  left_join(benicia_dates, by = c("animal_id", "water_year")) %>%
+  rowwise() %>%
+  mutate(
+    
+    flow_occ2_raw = {
+      if(is.na(arr_date_occ2)) NA_real_ else {
+        idx <- which(rv_flow_complete$date == arr_date_occ2)
+        if(length(idx) == 0) NA_real_ else rv_flow_complete$flow_cfs[idx]
+      }
+    },
+    
+    flow_occ3_raw = {
+      if(is.na(arr_date_occ3)) NA_real_ else {
+        idx <- which(ges_flow_complete$date == arr_date_occ3)
+        if(length(idx) == 0) NA_real_ else ges_flow_complete$flow_GES[idx]
+      }
+    },
+    
+    temp_7day_raw = {
+      if(is.na(benicia_date)) NA_real_ else {
+        window <- temp_flow_clean$temp_c[
+          temp_flow_clean$date >= (benicia_date - 7) &
+            temp_flow_clean$date <   benicia_date]
+        window <- window[!is.na(window)]
+        if(length(window) == 0) NA_real_ else mean(window, na.rm = TRUE)
+      }
+    }
+    
+  ) %>%
+  ungroup()
+
+cat("Missing flow_occ2:", sum(is.na(fish_cov_12b$flow_occ2_raw)), "\n")
+cat("Missing flow_occ3:", sum(is.na(fish_cov_12b$flow_occ3_raw)), "\n")
+cat("Missing temp_7day:", sum(is.na(fish_cov_12b$temp_7day_raw)), "\n")
+
+flow_occ2_mean_12b <- mean(fish_cov_12b$flow_occ2_raw, na.rm = TRUE)
+flow_occ2_sd_12b   <- sd(fish_cov_12b$flow_occ2_raw,   na.rm = TRUE)
+flow_occ3_mean_12b <- mean(fish_cov_12b$flow_occ3_raw, na.rm = TRUE)
+flow_occ3_sd_12b   <- sd(fish_cov_12b$flow_occ3_raw,   na.rm = TRUE)
+temp_7day_mean_12b <- mean(fish_cov_12b$temp_7day_raw, na.rm = TRUE)
+temp_7day_sd_12b   <- sd(fish_cov_12b$temp_7day_raw,   na.rm = TRUE)
+
+fish_cov_12b <- fish_cov_12b %>%
+  mutate(
+    flow_occ2_std = (flow_occ2_raw - flow_occ2_mean_12b) / flow_occ2_sd_12b,
+    flow_occ3_std = (flow_occ3_raw - flow_occ3_mean_12b) / flow_occ3_sd_12b,
+    temp_7day_std = (temp_7day_raw - temp_7day_mean_12b) / temp_7day_sd_12b
+  )
+
+cat("\nflow_occ2 mean:", round(flow_occ2_mean_12b, 0), "cfs SD:",
+    round(flow_occ2_sd_12b, 0), "\n")
+cat("flow_occ3 mean:", round(flow_occ3_mean_12b, 0), "cfs SD:",
+    round(flow_occ3_sd_12b, 0), "\n")
+cat("temp_7day mean:", round(temp_7day_mean_12b, 2), "C SD:",
+    round(temp_7day_sd_12b, 2), "\n")
+
+identical(fish_cov_12b$animal_id, detection_history$animal_id)
+identical(as.numeric(fish_cov_12b$water_year),
+          as.numeric(detection_history$water_year))
+
+flow_occ2_12b <- fish_cov_12b$flow_occ2_std
+flow_occ3_12b <- fish_cov_12b$flow_occ3_std
+temp_7day_12b <- fish_cov_12b$temp_7day_std
+
+flow_occ2_12b[is.na(flow_occ2_12b)] <- 0
+flow_occ3_12b[is.na(flow_occ3_12b)] <- 0
+temp_7day_12b[is.na(temp_7day_12b)] <- 0
+
+cat("flow_occ2 range:", round(range(flow_occ2_12b), 2), "\n")
+cat("flow_occ3 range:", round(range(flow_occ3_12b), 2), "\n")
+cat("temp_7day range:", round(range(temp_7day_12b), 2), "\n")
+
+# save the covariate file and standardization parameters
+# run this after your existing covariate extraction code
+
+library(writexl)
+
+# fish level covariates
+fish_cov_save <- fish_cov_12b %>%
+  dplyr::select(animal_id, water_year,
+                flow_occ2_raw, flow_occ2_std,
+                flow_occ3_raw, flow_occ3_std,
+                temp_7day_raw, temp_7day_std)
+
+write.csv(fish_cov_save,
+          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_model12b_covariates.csv",
+          row.names = FALSE)
+
+# standardization parameters for back-transforming later
+std_params <- data.frame(
+  covariate = c("flow_occ2", "flow_occ3", "temp_7day"),
+  mean      = c(flow_occ2_mean_12b, flow_occ3_mean_12b, temp_7day_mean_12b),
+  sd        = c(flow_occ2_sd_12b,   flow_occ3_sd_12b,   temp_7day_sd_12b)
+)
+
+write.csv(std_params,
+          "C:/Users/eetracy/Desktop/R_directory/ST_telemetry/gs_multistate/gs_model12b_std_params.csv",
+          row.names = FALSE)
+
+cat("Covariate files saved\n")
+cat("flow_occ2 mean:", round(flow_occ2_mean_12b, 0), "SD:", round(flow_occ2_sd_12b, 0), "\n")
+cat("flow_occ3 mean:", round(flow_occ3_mean_12b, 0), "SD:", round(flow_occ3_sd_12b, 0), "\n")
+cat("temp_7day mean:", round(temp_7day_mean_12b, 2), "SD:", round(temp_7day_sd_12b, 2), "\n")
